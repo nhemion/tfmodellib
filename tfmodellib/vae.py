@@ -297,6 +297,7 @@ if __name__ == '__main__':
     ax.set_title('latent encoding')
     ax.set_xlabel('latent dimension {:d}'.format(dim_inds[0]))
     ax.set_ylabel('latent dimension {:d}'.format(dim_inds[1]))
+    ax.set_zlabel('latent dimension {:d}'.format(dim_inds[2]))
 
     # bar plot mean standard deviation of latent dimensions
     ax = fig.add_subplot(1,3,3)
