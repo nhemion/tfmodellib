@@ -98,7 +98,7 @@ def build_vae_graph(input_tensor, latent_size, n_hidden, hidden_activation, outp
     # activation, which could kill off the units.
     latent_sigma = tf.layers.dense(encoder_out, units=latent_size, activation=None)
     latent_sigma_sq = tf.square(latent_sigma)
-    latent_log_sigma_sq = tf.log(latent_sigma_sq + 1e-45)
+    latent_log_sigma_sq = tf.log(latent_sigma_sq + 1e-20)
     latent_sigma = tf.abs(latent_sigma)
     latent_randn = tf.random_normal(shape=[latent_size], dtype=tf.float32)
 
