@@ -20,7 +20,7 @@ import tensorflow as tf
 
 @graph_def
 @docsig
-def build_mlp_graph(input_tensor, out_size, n_hidden, activation, use_dropout=False, use_bn=False, bn_is_training=False):
+def build_mlp_graph(input_tensor, out_size, n_hidden, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False):
     """
     Defines an MLP graph, with `len(n_hidden)` dense layers, where the `i`-th
     layer has `n_hidden[i]` units, and output of size `out_size`.
@@ -56,7 +56,7 @@ def build_mlp_graph(input_tensor, out_size, n_hidden, activation, use_dropout=Fa
     current_input = input_tensor
 
     for ind,n in enumerate(n_hidden):
-        current_input = tf.layers.dense(current_input, units=n, activation=activation, name='dense_layer_{:d}'.format(ind))
+        current_input = tf.layers.dense(current_input, units=n, activation=hidden_activation, name='dense_layer_{:d}'.format(ind))
 
         if use_dropout:
             current_input = tf.layers.dropout(current_input, name='dropout_layer_{:d}'.format(ind))
@@ -65,7 +65,7 @@ def build_mlp_graph(input_tensor, out_size, n_hidden, activation, use_dropout=Fa
             current_input = tf.layers.batch_normalization(current_input, training=bn_is_training, name='batchnorm_layer_{:d}'.format(ind))
 
     # define output layer
-    y_output = tf.layers.dense(current_input, units=out_size, activation=None, name='output_layer')
+    y_output = tf.layers.dense(current_input, units=out_size, activation=output_activation, name='output_layer')
 
     return y_output
 
@@ -78,7 +78,8 @@ class MLPConfig(TFModelConfig):
                 in_size=1,
                 out_size=1,
                 n_hidden=[10,10],
-                activation=tf.nn.relu,
+                hidden_activation=tf.nn.relu,
+                output_activation=None,
                 use_dropout=False,
                 use_bn=False)
 
