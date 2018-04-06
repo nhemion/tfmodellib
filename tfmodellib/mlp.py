@@ -36,14 +36,17 @@ def build_mlp_graph(input_tensor, out_size, n_hidden, hidden_activation=tf.nn.re
     n_hidden : list
         List of ints, specifying the number of units for each hidden layer.
 
-    activation : function
-        Activation function for the hidden layers.
+    hidden_activation : function (optional)
+        Activation function for the hidden layers (default: tf.nn.relu).
 
-    use_dropout : bool
+    output_activation : function (optional)
+        Activation function for the output layer (default: linear activation).
+
+    use_dropout : bool (optional)
         Indicates whether or not to use dropout after each hidden layer
         (default: False).
     
-    use_bn : bool
+    use_bn : bool (optional)
         Indicates whether or not to add a batch norm layer after each hidden
         layer (default: False).
 

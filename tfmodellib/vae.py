@@ -13,14 +13,14 @@
 # limitations under the License.
 # ==============================================================================
 
-from tfmodellib import TFModel, TFModelConfig, graph_def, docsig, MLP, MLPConfig, build_mlp_graph
+from tfmodellib import TFModel, TFModelConfig, graph_def, docsig, MLP, build_mlp_graph
 
 import tensorflow as tf
 
 
 @graph_def
 @docsig
-def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, **kwargs):
+def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False):
     """
     Defines a VAE graph, with `len(encoder_size)+1+len(decoder_size)` dense
     layers:
@@ -57,9 +57,15 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
         tf.nn.relu).
 
     output_activation : function (optional)
-        Activation function for the output layers (default: linear activation).
+        Activation function for the output layer (default: linear activation).
 
-    For additional *kwargs*, see tfmodellib.build_mlp_graph.
+    use_dropout : bool (optional)
+        Indicates whether or not to use dropout after each hidden layer
+        (default: False).
+    
+    use_bn : bool (optional)
+        Indicates whether or not to add a batch norm layer after each hidden
+        layer (default: False).
 
     Returns
     -------
@@ -88,7 +94,12 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
                 n_hidden=encoder_size[:-1],
                 hidden_activation=hidden_activation,
                 output_activation=hidden_activation,
-                **kwargs)
+                use_dropout=use_dropout,
+                use_bn=use_bn,
+                bn_is_training=bn_is_training)
+
+    if use_bn:
+        encoder_out = tf.layers.batch_normalization(encoder_out, training=bn_is_training, name='batchnorm_encoder_out')
 
     # define latent mean, sigma_sq, randn
     latent_mean = tf.layers.dense(encoder_out, units=latent_size, activation=None)
@@ -128,7 +139,12 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
                 n_hidden=decoder_size[:-1],
                 hidden_activation=hidden_activation,
                 output_activation=hidden_activation,
-                **kwargs)
+                use_dropout=use_dropout,
+                use_bn=use_bn,
+                bn_is_training=bn_is_training)
+
+    if use_bn:
+        decoder_out = tf.layers.batch_normalization(decoder_out, training=bn_is_training, name='batchnorm_decoder_out')
 
     reconstruction = tf.layers.dense(
             inputs=decoder_out, units=input_tensor.shape.as_list()[1],
@@ -145,7 +161,7 @@ def mean_of_squared_differences(a, b):
     return tf.reduce_mean(tf.squared_difference(a, b), axis=-1)
 
 
-class VAEConfig(MLPConfig):
+class VAEConfig(TFModelConfig):
 
     def init(self):
         self.update(
@@ -156,6 +172,7 @@ class VAEConfig(MLPConfig):
                 hidden_activation=tf.nn.relu,
                 output_activation=None,
                 optimizer=tf.train.AdamOptimizer,
+                use_dropout=False,
                 use_bn=False,
                 # The reconstruction_loss should return a one-dimensional
                 # vector of losses (one for each sample), not reduced into a
