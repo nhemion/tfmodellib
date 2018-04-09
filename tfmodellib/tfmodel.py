@@ -141,7 +141,8 @@ class TFModelConfig(dict):
             'saver_interval': None,
             'saver_max_to_keep': 50,
             'scope_name': 'tfmodel',
-            'log_level': logging.DEBUG
+            'log_level': logging.DEBUG,
+            'log_file': None
         }
 
         self.update(self.defaults)
@@ -244,9 +245,13 @@ class TFModel(object):
     def init_logger(self):
         self.logger = logging.Logger(
                 name=self.config['scope_name'], level=self.config['log_level'])
-        self.logger_handler = logging.StreamHandler(stream=sys.stderr)
-        self.logger_handler.terminator = ''
-        self.logger.addHandler(self.logger_handler)
+        self.logger_stderr_handler = logging.StreamHandler(stream=sys.stderr)
+        self.logger_stderr_handler.terminator = '\r'
+        self.logger.addHandler(self.logger_stderr_handler)
+        if self.config['log_file'] is not None:
+            self.logger_file_handler = logging.FileHandler(
+                    self.config['log_file'], mode='w')
+            self.logger.addHandler(self.logger_file_handler)
 
     def init_summaries(self):
         if self.config['summaries_root'] is not None:
@@ -269,7 +274,7 @@ class TFModel(object):
     def write_summary(self):
         
         global_step = self.get_global_step()
-        log_message = '\r{:9d}'.format(global_step)
+        log_message = '{:9d}'.format(global_step)
         log_message += '\ttrain loss: {:4.05f}'.format(self.last_training_loss)
         log_message += '\tvalidate: {:4.05f}  '.format(self.last_validation_loss)
         self.logger.log(logging.INFO, log_message)
