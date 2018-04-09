@@ -109,36 +109,28 @@ class MLP(TFModel):
         self.loss = tf.losses.mean_squared_error(self.y_target, self.y_output)
 
         # define optimizer
-        self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, name='optimizer')
-        self.minimize_op = self.optimizer.minimize(self.loss, name='minimize_op')
+        with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
+            with tf.variable_scope('optimization'):
+                self.optimizer = tf.train.AdamOptimizer(learning_rate=self.learning_rate, name='optimizer')
+                self.minimize_op = self.optimizer.minimize(self.loss, name='minimize_op')
 
     def run_update_and_loss(self, batch_inputs, batch_targets, learning_rate):
-        ops_to_run = [self.loss, self.minimize_op]
-        feed_dict={
+        loss, _ = self.sess.run([self.loss, self.minimize_op], feed_dict={
                 self.x_input: batch_inputs,
                 self.y_target: batch_targets,
-                self.learning_rate: learning_rate}
-        if self.config['use_bn']:
-            ops_to_run += self.sess.graph.get_collection(tf.GraphKeys.UPDATE_OPS)
-            feed_dict[self.bn_is_training] = True
-        ops_result = self.sess.run(ops_to_run, feed_dict=feed_dict)
-        loss = ops_result[0]
+                self.learning_rate: learning_rate,
+                self.bn_is_training: True})
         return loss
 
     def run_loss(self, batch_inputs, batch_targets, learning_rate):
-        feed_dict={
+        loss = self.sess.run(self.loss, feed_dict={
                 self.x_input: batch_inputs,
-                self.y_target: batch_targets}
-        if self.config['use_bn']:
-            feed_dict[self.bn_is_training] = False
-        loss = self.sess.run(self.loss, feed_dict=feed_dict)
+                self.y_target: batch_targets,
+                self.bn_is_training: False})
         return loss
 
     def run_output(self, inputs):
-        feed_dict={self.x_input: inputs}
-        if self.config['use_bn']:
-            feed_dict[self.bn_is_training] = False
-        return self.sess.run(self.y_output, feed_dict=feed_dict)
+        return self.sess.run(self.y_output, feed_dict={self.x_input: inputs, self.bn_is_training: False})
 
 
 if __name__ == '__main__':
@@ -148,11 +140,11 @@ if __name__ == '__main__':
     import logging
 
     # create the model
-    conf = MLPConfig(log_level=logging.DEBUG, n_hidden=[25])
+    conf = MLPConfig(log_level=logging.DEBUG, n_hidden=[25,25], use_bn=True)
     model = MLP(conf)
 
     # generate some data
-    x = np.random.rand(10000).reshape((-1,1))
+    x = np.random.rand(1000).reshape((-1,1))
     y = np.sin(7*x)
 
     x_train = x[:int(x.shape[0]*0.8)]
@@ -162,14 +154,14 @@ if __name__ == '__main__':
 
 
     # run the training
-    for _ in range(100):
+    for _ in range(1000):
         model.train(
                 train_inputs=x_train,
                 train_targets=y_train,
                 validation_inputs=x_valid,
                 validation_targets=y_valid,
-                batch_size=1000,
-                learning_rate=0.05)
+                batch_size=100,
+                learning_rate=0.001)
 
     # get estimates
     y_est = model.run_output(inputs=x_valid)
