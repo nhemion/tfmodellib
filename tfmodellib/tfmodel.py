@@ -371,10 +371,12 @@ class TFModel(object):
         else:
             training_inds = inds
  
-        training_loss = self.run_update_and_loss(
-                batch_inputs=train_inputs[training_inds],
-                batch_targets=train_targets[training_inds],
-                *args, **kwargs)
+        with self.graph.as_default():
+            with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
+                training_loss = self.run_update_and_loss(
+                        batch_inputs=train_inputs[training_inds],
+                        batch_targets=train_targets[training_inds],
+                        *args, **kwargs)
 
         validation_loss = np.nan
         if validation_inputs is not None:

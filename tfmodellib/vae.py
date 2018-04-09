@@ -18,9 +18,45 @@ from tfmodellib import TFModel, TFModelConfig, graph_def, docsig, MLP, build_mlp
 import tensorflow as tf
 
 
+def build_vae_latent_layers(input_tensor, units):
+
+    #
+    # define latent mean, sigma_sq, randn
+    #
+
+    latent_mean = tf.layers.dense(input_tensor, units=units, activation=None, name='latent_mean')
+
+    # For the computation of the loss, we need:
+    #     sigma**2
+    #     log(sigma**2)
+    # Other implementation of a VAE map the encoder output onto
+    # log(sigma**2).  This can however cause numerical problems when
+    # computing exp(log(sigma**2)) to obtain sigma**2 (note that
+    # float32(exp(88.73))=inf). To avoid this, we instead map the encoder
+    # output onto sigma directly, and compute sigma**2 and log(sigma**2)
+    # from there (while adding a small constant to sigma**2 before
+    # computing the log, in case sigma is exactly 0.0).
+    # Furthermore, we use linear activation, which can produce negative
+    # values for sigma. We compensate for this by multiplying the random
+    # noise with the absolute value of sigma, instead of relying on
+    # something like ReLU activation, which could kill off the units.
+
+    latent_sigma = tf.layers.dense(input_tensor, units=units, activation=None, name='latent_sigma_before_abs')
+    latent_sigma_sq = tf.square(latent_sigma, name='latent_sigma_sq')
+    small_constant_for_numerical_stability = tf.constant(1e-20, dtype=tf.float32, name='small_constant_for_numerical_stability')
+    latent_log_sigma_sq = tf.log(latent_sigma_sq + small_constant_for_numerical_stability, name='latent_log_sigma_sq')
+    latent_sigma = tf.abs(latent_sigma, name='latent_sigma')
+    latent_randn = tf.random_normal(shape=tf.shape(latent_mean), dtype=tf.float32, name='latent_randn')
+
+    # define latent layer
+    latent_layer = tf.add(latent_mean, tf.multiply(latent_sigma, latent_randn), name='latent')
+
+    return latent_layer, latent_mean, latent_sigma, latent_sigma_sq, latent_log_sigma_sq
+
+
 @graph_def
 @docsig
-def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False):
+def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_build_fun=build_vae_latent_layers):
     """
     Defines a VAE graph, with `len(encoder_size)+1+len(decoder_size)` dense
     layers:
@@ -98,41 +134,24 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
                 use_bn=use_bn,
                 bn_is_training=bn_is_training)
 
-    if use_bn:
-        encoder_out = tf.layers.batch_normalization(encoder_out, training=bn_is_training, name='batchnorm_encoder_out')
+        if use_bn:
+            encoder_out = tf.layers.batch_normalization(encoder_out, training=bn_is_training, name='batchnorm_encoder_out')
 
-    # define latent mean, sigma_sq, randn
-    latent_mean = tf.layers.dense(encoder_out, units=latent_size, activation=None)
-
-    # For the computation of the loss, we need:
-    #     sigma**2
-    #     log(sigma**2)
-    # Other implementation of a VAE map the encoder output onto log(sigma**2).
-    # This can however cause numerical problems when computing
-    # exp(log(sigma**2)) to obtain sigma**2 (note that
-    # float32(exp(88.73))=inf). To avoid this, we instead map the encoder
-    # output onto sigma directly, and compute sigma**2 and log(sigma**2) from
-    # there (while adding a small constant to sigma**2 before computing the
-    # log, in case sigma is exactly 0.0).
-    # Furthermore, we use linear activation, which can produce negative values
-    # for sigma. We compensate for this by multiplying the random noise with
-    # the absolute value of sigma, instead of relying on something like ReLU
-    # activation, which could kill off the units.
-    latent_sigma = tf.layers.dense(encoder_out, units=latent_size, activation=None)
-    latent_sigma_sq = tf.square(latent_sigma)
-    latent_log_sigma_sq = tf.log(latent_sigma_sq + 1e-20)
-    latent_sigma = tf.abs(latent_sigma)
-    latent_randn = tf.random_normal(shape=[latent_size], dtype=tf.float32)
-
-    # define latent layer
-    latent_layer = tf.add(latent_mean, tf.multiply(latent_sigma, latent_randn))
+    with tf.variable_scope('latent_layers'):
+        latent_layer, \
+        latent_mean, \
+        latent_sigma, \
+        latent_sigma_sq, \
+        latent_log_sigma_sq = build_vae_latent_layers(encoder_out, latent_size)
 
     # define decoder
-    if decoder_size is None:
-        decoder_size = encoder_size
-        decoder_size.reverse()
 
     with tf.variable_scope('decoder'):
+
+        if decoder_size is None:
+            decoder_size = encoder_size
+            decoder_size.reverse()
+
         decoder_out = build_mlp_graph(
                 input_tensor=latent_layer,
                 out_size=decoder_size[-1],
@@ -143,12 +162,12 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
                 use_bn=use_bn,
                 bn_is_training=bn_is_training)
 
-    if use_bn:
-        decoder_out = tf.layers.batch_normalization(decoder_out, training=bn_is_training, name='batchnorm_decoder_out')
+        if use_bn:
+            decoder_out = tf.layers.batch_normalization(decoder_out, training=bn_is_training, name='batchnorm_decoder_out')
 
-    reconstruction = tf.layers.dense(
-            inputs=decoder_out, units=input_tensor.shape.as_list()[1],
-            activation=output_activation)
+        reconstruction = tf.layers.dense(
+                inputs=decoder_out, units=input_tensor.shape.as_list()[1],
+                activation=output_activation)
 
     return reconstruction, latent_layer, latent_mean, latent_sigma, latent_sigma_sq, latent_log_sigma_sq
 
@@ -159,6 +178,14 @@ def sum_of_squared_differences(a, b):
 
 def mean_of_squared_differences(a, b):
     return tf.reduce_mean(tf.squared_difference(a, b), axis=-1)
+
+
+def variational_loss(latent_mean, latent_sigma_sq, latent_log_sigma_sq):
+    return 0.5 * tf.reduce_sum(
+            - 1.0
+            - latent_log_sigma_sq
+            + tf.square(latent_mean)
+            + latent_sigma_sq, axis=-1)
 
 
 class VAEConfig(TFModelConfig):
@@ -186,71 +213,66 @@ class VAE(MLP):
 
     def build_graph(self):
 
-        # define input and target placeholder
-        self.x_input = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']])
-        self.y_target = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']])
+        with tf.variable_scope('placeholders'):
+            # define input and target placeholder
+            self.x_input = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']], name='x_input')
+            self.y_target = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']], name='y_target')
+
+            # define learning rate
+            self.learning_rate = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
+
+            # training flag for batchnorm
+            self.bn_is_training = tf.placeholder(dtype=tf.bool, shape=[], name='bn_is_training')
 
         # define the base graph
-        kwargs = {}
-        if self.config['use_bn']:
-            self.bn_is_training = tf.placeholder(dtype=tf.bool, shape=[], name='bn_is_training')
-            kwargs = {'bn_is_training': self.bn_is_training}
-        kwargs.update(self.config)
-
-        self.y_output, \
-        self.latent_layer, \
-        self.latent_mean, \
-        self.latent_sigma, \
-        self.latent_sigma_sq, \
-        self.latent_log_sigma_sq = build_vae_graph(input_tensor=self.x_input, **kwargs)
-
-        # define learning rate
-        self.learning_rate = tf.placeholder(dtype=tf.float32, shape=[])
+        with tf.variable_scope('vae_graph'):
+            self.y_output, \
+            self.latent_layer, \
+            self.latent_mean, \
+            self.latent_sigma, \
+            self.latent_sigma_sq, \
+            self.latent_log_sigma_sq = build_vae_graph(input_tensor=self.x_input, bn_is_training=self.bn_is_training, **self.config)
 
         # define loss
+        with tf.variable_scope('losses'):
 
-        # reconstruction losses for all samples, a vector of shape BATCH_SIZE x 1
-        self.reconstruction_losses = self.config['reconstruction_loss'](self.y_target, self.y_output)
+            # reconstruction losses for all samples, a vector of shape BATCH_SIZE x 1
+            with tf.variable_scope('reconstruction_losses'):
+                self.reconstruction_losses = self.config['reconstruction_loss'](self.y_target, self.y_output)
 
-        # we keep beta as a placeholder, to allow adjusting it throughout the training.
-        self.beta = tf.placeholder(dtype=tf.float32, shape=[])
+            # we keep beta as a placeholder, to allow adjusting it throughout the training.
+            self.beta = tf.placeholder(dtype=tf.float32, shape=[], name='beta')
 
-        # variational (KL) losses for all samples, a vector of shape BATCH_SIZE x 1
-        self.variational_losses = 0.5 * self.beta * tf.reduce_sum(
-                - 1.0
-                - self.latent_log_sigma_sq
-                + tf.square(self.latent_mean)
-                + self.latent_sigma_sq, axis=-1)
+            # variational (KL) losses for all samples, a vector of shape BATCH_SIZE x 1
+            with tf.variable_scope('variational_losses'):
+                self.variational_losses = self.beta * variational_loss(
+                        self.latent_mean, self.latent_sigma_sq, self.latent_log_sigma_sq)
 
-        # combined loss, scalar
-        self.loss = tf.reduce_mean(tf.add(self.reconstruction_losses, self.variational_losses), axis=0)
+            # combined loss, scalar
+            with tf.variable_scope('loss'):
+                self.loss = tf.reduce_mean(tf.add(self.reconstruction_losses, self.variational_losses), axis=0)
 
         # define optimizer
-        self.optimizer = self.config['optimizer'](learning_rate=self.learning_rate)
-        self.minimize_op = self.optimizer.minimize(self.loss)
+        with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
+            with tf.variable_scope('optimization'):
+                self.optimizer = self.config['optimizer'](learning_rate=self.learning_rate)
+                self.minimize_op = self.optimizer.minimize(self.loss)
 
     def run_update_and_loss(self, batch_inputs, batch_targets, learning_rate, beta):
-        ops_to_run = [self.loss, self.minimize_op]
-        feed_dict={
+        loss, _ = self.sess.run([self.loss, self.minimize_op], feed_dict={
                 self.x_input: batch_inputs,
                 self.y_target: batch_targets,
                 self.learning_rate: learning_rate,
-                self.beta: beta}
-        if self.config['use_bn']:
-            ops_to_run += self.sess.graph.get_collection(tf.GraphKeys.UPDATE_OPS)
-            feed_dict[self.bn_is_training] = True
-        ops_result = self.sess.run(ops_to_run, feed_dict=feed_dict)
-        loss = ops_result[0]
+                self.beta: beta,
+                self.bn_is_training: True})
         return loss
 
     def run_loss(self, batch_inputs, batch_targets, learning_rate, beta):
-        feed_dict={
+        loss = self.sess.run(self.loss, feed_dict={
                 self.x_input: batch_inputs,
                 self.y_target: batch_targets,
-                self.beta: beta}
-        if self.config['use_bn']:
-            feed_dict[self.bn_is_training] = False
-        loss = self.sess.run(self.loss, feed_dict=feed_dict)
+                self.beta: beta,
+                self.bn_is_training: False})
         return loss
 
 if __name__ == '__main__':
@@ -266,7 +288,8 @@ if __name__ == '__main__':
             encoder_size=[150,150],
             hidden_activation=tf.nn.relu,
             output_activation=None,
-            reconstruction_loss=mean_of_squared_differences)
+            reconstruction_loss=mean_of_squared_differences,
+            use_bn=True)
     model = VAE(conf)
 
     # generate some data
@@ -288,8 +311,8 @@ if __name__ == '__main__':
                 train_targets=x_train,
                 validation_inputs=x_valid,
                 validation_targets=x_valid,
-                batch_size=100,
-                learning_rate=0.0001,
+                batch_size=1000,
+                learning_rate=0.01,
                 beta=0.01)
 
     # get estimates
@@ -317,7 +340,7 @@ if __name__ == '__main__':
     zz = z(xx,yy)
     x = np.vstack((xx.flat,yy.flat,zz.flat)).T
 
-    latent_mean, latent_sigma = model.sess.run([model.latent_mean, model.latent_sigma], feed_dict={model.x_input: x})
+    latent_mean, latent_sigma = model.sess.run([model.latent_mean, model.latent_sigma], feed_dict={model.x_input: x, model.bn_is_training: False})
     latent_sigma_mean = latent_sigma.mean(axis=0)
     dim_inds = np.argsort(latent_sigma_mean)[:3]
     latent_u,latent_v,latent_w = latent_mean[:,dim_inds].reshape((l.size,l.size,3)).transpose((2,0,1))
