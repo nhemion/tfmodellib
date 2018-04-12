@@ -276,7 +276,8 @@ class TFModel(object):
         global_step = self.get_global_step()
         log_message = '{:9d}'.format(global_step)
         log_message += '\ttrain loss: {:4.05f}'.format(self.last_training_loss)
-        log_message += '\tvalidate: {:4.05f}  '.format(self.last_validation_loss)
+        if not np.isnan(self.last_validation_loss):
+            log_message += '\tvalidate: {:4.05f}'.format(self.last_validation_loss)
         self.logger.log(logging.INFO, log_message)
         sys.stderr.flush()
 
@@ -287,10 +288,11 @@ class TFModel(object):
                     tf.Summary(value=[self.train_loss_summary_value]),
                     global_step=global_step)
 
-            self.valid_loss_summary_value.simple_value = self.last_validation_loss
-            self.summary_fwriter.add_summary(
-                    tf.Summary(value=[self.valid_loss_summary_value]),
-                    global_step=global_step)
+            if not np.isnan(self.last_validation_loss):
+                self.valid_loss_summary_value.simple_value = self.last_validation_loss
+                self.summary_fwriter.add_summary(
+                        tf.Summary(value=[self.valid_loss_summary_value]),
+                        global_step=global_step)
 
     def get_saver_variables(self):
         """ Override this to only save specific variables in checkpoints. """
