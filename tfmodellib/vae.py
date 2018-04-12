@@ -180,8 +180,8 @@ def mean_of_squared_differences(a, b):
     return tf.reduce_mean(tf.squared_difference(a, b), axis=-1)
 
 
-def variational_loss(latent_mean, latent_sigma_sq, latent_log_sigma_sq):
-    return 0.5 * tf.reduce_sum(
+def variational_loss(latent_mean, latent_sigma_sq, latent_log_sigma_sq, beta):
+    return beta * 0.5 * tf.reduce_sum(
             - 1.0
             - latent_log_sigma_sq
             + tf.square(latent_mean)
@@ -245,8 +245,9 @@ class VAE(MLP):
 
             # variational (KL) losses for all samples, a vector of shape BATCH_SIZE x 1
             with tf.variable_scope('variational_losses'):
-                self.variational_losses = self.beta * variational_loss(
-                        self.latent_mean, self.latent_sigma_sq, self.latent_log_sigma_sq)
+                self.variational_losses = variational_loss(
+                        self.latent_mean, self.latent_sigma_sq,
+                        self.latent_log_sigma_sq, self.beta)
 
             # combined loss, scalar
             with tf.variable_scope('loss'):
