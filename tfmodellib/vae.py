@@ -145,7 +145,6 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
         latent_log_sigma_sq = build_vae_latent_layers(encoder_out, latent_size)
 
     # define decoder
-
     with tf.variable_scope('decoder'):
 
         if decoder_size is None:
@@ -201,12 +200,13 @@ class VAEConfig(TFModelConfig):
                 optimizer=tf.train.AdamOptimizer,
                 use_dropout=False,
                 use_bn=False,
-                # The reconstruction_loss should return a one-dimensional
-                # vector of losses (one for each sample), not reduced into a
-                # scalar. We compute the mean of these values later, after
-                # adding the vector of variational losses (see
-                # VAE.build_graph).
-                reconstruction_loss=sum_of_squared_differences)
+                # Loss functions should return a one-dimensional vector of
+                # losses (one for each sample), not reduced into a scalar. We
+                # compute the mean of these values later, after adding the
+                # vector of variational losses (see VAE.build_graph).
+                reconstruction_loss=sum_of_squared_differences,
+                variational_loss=variational_loss,
+                build_vae_latent_layers_fun=build_vae_latent_layers)
         super(VAEConfig, self).init()
 
 class VAE(MLP):
@@ -245,7 +245,7 @@ class VAE(MLP):
 
             # variational (KL) losses for all samples, a vector of shape BATCH_SIZE x 1
             with tf.variable_scope('variational_losses'):
-                self.variational_losses = variational_loss(
+                self.variational_losses = self.config['variational_loss'](
                         self.latent_mean, self.latent_sigma_sq,
                         self.latent_log_sigma_sq, self.beta)
 
