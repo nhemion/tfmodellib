@@ -102,7 +102,7 @@ def build_cae_2d_graph(
         current_input = tf.layers.conv2d(
                 current_input, filters=fs,
                 kernel_size=kernel_sizes[ind], strides=strides[ind],
-                use_bias=False, name='conv{:d}'.format(ind))
+                use_bias=False, padding='same', name='conv{:d}'.format(ind))
 
         if use_bn:
             current_input = tf.layers.batch_normalization(current_input)
@@ -143,7 +143,8 @@ def build_cae_2d_graph(
         current_input = tf.layers.conv2d_transpose(
                 current_input, filters=n_filters[ind],
                 kernel_size=kernel_sizes[ind], strides=strides[ind],
-                use_bias=False, name='conv{:d}'.format(ind), reuse=True)
+                use_bias=False, padding='same', name='conv{:d}'.format(ind),
+                reuse=True)
 
     reconstruction = current_input
 
