@@ -95,12 +95,8 @@ class MLP(TFModel):
         self.y_target = tf.placeholder(dtype=tf.float32, shape=[None, self.config['out_size']], name='y_target')
 
         # define the base graph
-        kwargs = {}
-        if self.config['use_bn']:
-            self.bn_is_training = tf.placeholder(dtype=tf.bool, shape=[], name='bn_is_training')
-            kwargs = {'bn_is_training': self.bn_is_training}
-        kwargs.update(self.config)
-        self.y_output = build_mlp_graph(input_tensor=self.x_input, **kwargs)
+        self.bn_is_training = tf.placeholder(dtype=tf.bool, shape=[], name='bn_is_training')
+        self.y_output = build_mlp_graph(input_tensor=self.x_input, bn_is_training=self.bn_is_training, **self.config)
 
         # define learning rate
         self.learning_rate = tf.placeholder(dtype=tf.float32, shape=[], name='learning_rate')
