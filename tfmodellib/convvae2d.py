@@ -13,29 +13,29 @@
 # limitations under the License.
 # ==============================================================================
 
-from tfmodellib import TFModel, TFModelConfig, graph_def, docsig, CAE2d, CAE2dConfig, build_cae_2d_graph, VAE, VAEConfig, build_vae_graph, variational_loss
-
+from tfmodellib import TFModel, TFModelConfig, graph_def, docsig, CAE2dConfig, build_cae_2d_graph, VAEConfig, build_vae_graph
 import tensorflow as tf
 import numpy as np
 import sys
 
-# def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_build_fun=build_vae_latent_layers):
-# def sum_of_squared_differences(a, b):
-# def mean_of_squared_differences(a, b):
-# def variational_loss(latent_mean, latent_sigma_sq, latent_log_sigma_sq, beta):
 
-
-class ConvVAE2dConfig(CAE2dConfig, VAEConfig):
+class ConvVAE2dConfig(VAEConfig, CAE2dConfig):
 
     def init(self):
-        self = super(ConvVAE2dConfig, self).init()
+        super(ConvVAE2dConfig, self).init()
+        # a bit of renaming to disambiguate meaning of parameters
+        self.update(
+                conv_activation=self.pop('nonlinearity'),
+                dense_encoder_size=self.pop('encoder_size'),
+                dense_decoder_size=self.pop('decoder_size'),
+                dense_hidden_activation=self.pop('hidden_activation'),
+                dense_output_activation=self.pop('output_activation'),
+                conv_layer_activation=None)
 
 
 class ConvVAE2d(TFModel):
 
     def build_graph(self):
-
-        assert sys.version_info >= (3,0), 'Requires Python 3.0 or newer'
 
         # define input and target placeholder
         self.x_input = tf.placeholder(dtype=tf.float32, shape=[None]+self.config['in_size'])
@@ -44,8 +44,9 @@ class ConvVAE2d(TFModel):
         # define the convolutional base graph
         self.y_output = build_cae_2d_graph(
                 input_tensor=self.x_input,
-                **self.config,
-                latent_op=self._get_build_vae_graph_op())
+                nonlinearity=self.config['conv_activation'],
+                latent_op=self._get_build_vae_graph_op(),
+                **self.config)
 
         # define learning rate
         self.learning_rate = tf.placeholder(dtype=tf.float32, shape=[])
@@ -94,6 +95,10 @@ class ConvVAE2d(TFModel):
             self.latent_sigma_sq, \
             self.latent_log_sigma_sq = build_vae_graph(
                     self.dense_vae_input_tensor,
+                    encoder_size=self.config['dense_encoder_size'],
+                    decoder_size=self.config['dense_decoder_size'],
+                    hidden_activation=self.config['dense_hidden_activation'],
+                    output_activation=self.config['dense_output_activation'],
                     latent_layer_build_fun=self.config['build_vae_latent_layers_fun'],
                     **self.config)
 
@@ -128,8 +133,10 @@ class ConvVAE2d(TFModel):
 if __name__ == '__main__':
 
     import numpy as np
+    from mpl_toolkits.mplot3d import Axes3D
     import matplotlib.pyplot as plt
     import tempfile
+    import traceback
     import logging
     import shutil
     import os
@@ -145,22 +152,25 @@ if __name__ == '__main__':
         mnist = tf.contrib.learn.datasets.load_dataset("mnist")
         os.chdir(cwd)
         train_data = mnist.train.images.reshape((-1,28,28,1))
-        eval_data = mnist.test.images.reshape((-1,28,28,1))
+        test_data = mnist.test.images.reshape((-1,28,28,1))
+        test_labels = mnist.test.labels
+
 
         # create the model
         conf = ConvVAE2dConfig(
-                log_level=logging.DEBUG,
                 in_size=[28,28,1],
                 n_filters=[50,50],
                 kernel_sizes=[3,3],
                 strides=[1,1],
-                nonlinearity=tf.nn.relu,
+                conv_activation=tf.nn.relu,
                 pooling_sizes=[2,2],
                 latent_size=3,
-                n_hidden=[100,100],
-                activation=tf.nn.relu,
-                use_dropout=False,
-                use_bn=False)
+                dense_encoder_size=[100,100],
+                dense_decoder_size=None,
+                dense_hidden_activation=tf.nn.relu,
+                dense_output_activation=None,
+                output_layer_activation=None)
+
         model = ConvVAE2d(conf)
 
         # run the training
@@ -168,14 +178,14 @@ if __name__ == '__main__':
             model.train(
                     train_inputs=train_data,
                     train_targets=train_data,
-                    validation_inputs=eval_data,
-                    validation_targets=eval_data,
+                    validation_inputs=test_data,
+                    validation_targets=test_data,
                     batch_size=1000,
                     learning_rate=0.0001,
                     beta=0.001)
     
         # get estimates
-        reconstruction = model.infer(inputs=eval_data[:1000], batch_size=None)
+        reconstruction = model.infer(inputs=test_data[:1000], batch_size=None)
     
         # plot data and estimates
         fig = plt.figure()
@@ -185,10 +195,19 @@ if __name__ == '__main__':
             im = np.uint8(np.minimum(np.maximum(0.0, im), 1.0) * 255)
             ax.imshow(im)
 
+        fig = plt.figure()
+        ax = fig.gca(projection='3d')
+        z = model.sess.run(model.latent_mean, feed_dict={model.x_input: test_data})
+        n_classes = test_labels.max()+1
+        cmap = plt.get_cmap('jet', n_classes)
+        for class_id in range(n_classes):
+            ax.plot(*z[test_labels==class_id].T, ls='none', marker='.', mec=cmap(class_id), mew=0.0, label='{:d}'.format(class_id))
+        ax.legend()
+
         plt.show()
 
     except Exception as e:
-        print(e)
+        print(traceback.format_exc())
 
     finally:
         try:
