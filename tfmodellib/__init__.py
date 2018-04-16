@@ -17,7 +17,6 @@ from tfmodellib.tfmodel import TFModel, TFModelConfig, graph_def, docsig
 from tfmodellib.linreg import LinReg, LinRegConfig, build_linreg_graph
 from tfmodellib.mlp import MLP, MLPConfig, build_mlp_graph
 from tfmodellib.autoencoder import AutoEncoder, AutoEncoderConfig, build_autoencoder_graph
-from tfmodellib.vae import VAE, VAEConfig, build_vae_graph
+from tfmodellib.vae import VAE, VAEConfig, build_vae_graph, variational_loss
 from tfmodellib.cae2d import CAE2d, CAE2dConfig, build_cae_2d_graph
-# if sys.version_info >= (3,0):
-#     from tfmodellib.cdvae2d import CDVAE2d, CDVAE2dConfig
+from tfmodellib.convvae2d import ConvVAE2d, ConvVAE2dConfig
