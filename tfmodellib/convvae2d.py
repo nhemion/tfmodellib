@@ -55,22 +55,21 @@ class ConvVAE2d(TFModel):
         with tf.variable_scope('losses'):
 
             # reconstruction losses for all samples, a vector of shape BATCH_SIZE x 1
-            with tf.variable_scope('reconstruction_losses'):
-                l = self.config['reconstruction_loss'](self.y_target, self.y_output)
-                self.reconstruction_losses = tf.reduce_sum(l, axis=list(range(1, len(l.shape))))
+            with tf.variable_scope('reconstruction_loss'):
+                self.reconstruction_loss = self.config['reconstruction_loss'](self.y_target, self.y_output)
 
             # we keep beta as a placeholder, to allow adjusting it throughout the training.
             self.beta = tf.placeholder(dtype=tf.float32, shape=[], name='beta')
 
             # variational (KL) losses for all samples, a vector of shape BATCH_SIZE x 1
-            with tf.variable_scope('variational_losses'):
-                self.variational_losses = self.config['variational_loss'](
+            with tf.variable_scope('variational_loss'):
+                self.variational_loss = self.config['variational_loss'](
                         self.latent_mean, self.latent_sigma_sq,
-                        self.latent_log_sigma_sq, self.beta)
+                        self.latent_log_sigma_sq)
 
             # combined loss, scalar
             with tf.variable_scope('loss'):
-                self.loss = tf.reduce_mean(tf.add(self.reconstruction_losses, self.variational_losses), axis=0)
+                self.loss = self.reconstruction_loss + self.beta * self.variational_loss
 
         # define optimizer
         with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
