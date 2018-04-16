@@ -24,7 +24,8 @@ import tensorflow as tf
 def build_cae_2d_graph(
         input_tensor,
         n_filters, kernel_sizes, strides, nonlinearity=tf.nn.relu,
-        pooling_sizes=None, use_dropout=False, use_bn=False,
+        pooling_sizes=None, pooling_fun=tf.nn.avg_pool,
+        unpooling_fun=tf.image.resize_images, use_dropout=False, use_bn=False,
         latent_op=None):
     """
     Defines a convolutional autoencoder graph, with `2*len(n_filters)`
@@ -112,7 +113,7 @@ def build_cae_2d_graph(
         map_dimensions.append(current_input.get_shape().as_list()[1:3])
 
         if pooling_sizes is not None and pooling_sizes[ind] is not None:
-            current_input = tf.nn.avg_pool(
+            current_input = pooling_fun(
                     current_input,
                     ksize=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
                     strides=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
@@ -136,7 +137,7 @@ def build_cae_2d_graph(
 
         if pooling_sizes is not None and pooling_sizes[ind] is not None:
             # upsampling unpooling
-            current_input = tf.image.resize_images(current_input, map_dimensions[ind])
+            current_input = unpooling_fun(current_input, map_dimensions[ind])
 
         # deconvolution
         current_input = tf.layers.conv2d_transpose(
@@ -159,7 +160,9 @@ class CAE2dConfig(TFModelConfig):
                 kernel_sizes=[3,3],
                 strides=[1,1],
                 nonlinearity=tf.nn.relu,
-                pooling_sizes=[2,2],
+                pooling_sizes=None,
+                pooling_fun=tf.nn.avg_pool,
+                unpooling_fun=tf.image.resize_images,
                 use_dropout=False,
                 use_bn=False)
         super(CAE2dConfig, self).init()
