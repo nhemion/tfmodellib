@@ -162,6 +162,7 @@ class CAE2dConfig(TFModelConfig):
                 pooling_sizes=[2,2],
                 use_dropout=False,
                 use_bn=False)
+        super(CAE2dConfig, self).init()
 
 
 class CAE2d(TFModel):
