@@ -129,8 +129,7 @@ def build_cae_2d_graph(
     # number of input filters of the corresponding layer in the encoder. Thus,
     # we insert the number of filters of the input tensor at the beginning of
     # the n_filters list, and remove the last element of the list.
-    n_filters.insert(0, input_n_filters)
-    n_filters = n_filters[:-1]
+    n_filters = [input_n_filters] + n_filters[:-1]
 
     # iterate layers in reverse order
     for ind in reversed(range(len(n_filters))):
