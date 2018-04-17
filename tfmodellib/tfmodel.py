@@ -259,10 +259,11 @@ class TFModel(object):
             self.summaries[key] = (float(), mode)
 
     def update_summary(self, key, val):
-        if key not in self.summary_values.keys():
-            self.logger.log(logging.WARNING, 'Invalid summary key "{:s}", skipping.'.format(key))
-        else:
-            self.summary_values[key][0].simple_value = val
+        if self.summary_fwriter is not None:
+            if key not in self.summary_values.keys():
+                self.logger.log(logging.WARNING, 'Invalid summary key "{:s}", skipping.'.format(key))
+            else:
+                self.summary_values[key][0].simple_value = val
 
     def init_summaries(self):
         if self.config['summaries_root'] is not None:
