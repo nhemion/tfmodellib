@@ -20,17 +20,18 @@ import tensorflow as tf
 
 @graph_def
 @docsig
-def build_autoencoder_graph(input_tensor, latent_size, n_hidden, activation, **kwargs):
+def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_fun=None):
     """
-    Defines an autoencoder graph, with `2*len(n_hidden)+1` dense layers:
+    Defines an autoencoder graph, with `len(encoder_size)+1+len(decoder_size)`
+    dense layers:
     
-    - `len(n_hidden)` layers for the encoder, where the i-th encoder layer has
-      `n_hidden[i]` units.
+    - `len(encoder_size)` layers for the encoder, where the i-th encoder layer has
+      `encoder_size[i]` units.
 
     - The latent (code) layer with `latent_size` units;
 
-    - `len(n_hidden)` layers for the decoder, where the j-th decoder layer has
-      `n_hidden[-j-1]` units.
+    - `len(decoder_size)` layers for the decoder, where the j-th decoder layer
+      has `decoder_size[j]` units.
    
     The output layer is of same dimension as the input layer.
 
@@ -40,15 +41,40 @@ def build_autoencoder_graph(input_tensor, latent_size, n_hidden, activation, **k
         The input tensor of size NUM_SAMPLES x INPUT_SIZE.
 
     latent_size : int
-        Number of units in the MLP's output layer.
+        Number of units in the autoencoder's latent layer.
 
-    n_hidden : list
-        List of ints, specifying the number of units for each hidden layer.
+    encoder_size : list
+        List of ints, specifying the number of units for each hidden layer of
+        the encoder.
 
-    activation : function
-        Activation function for the encoder- and decoder-layers.
+    decoder_size : list (optional)
+        List of ints, specifying the number of units for each hidden layer of
+        the decoder. If None (the default), the reverse of encoder_size will be
+        used.
 
-    For additional *kwargs*, see tfmodels.build_mlp_graph.
+    hidden_activation : function (optional)
+        Activation function for the encoder- and decoder-layers (default:
+        tf.nn.relu).
+
+    output_activation : function (optional)
+        Activation function for the output layer (default: linear activation).
+
+    use_dropout : bool (optional)
+        Indicates whether or not to use dropout after each hidden layer
+        (default: False).
+    
+    use_bn : bool (optional)
+        Indicates whether or not to add a batch norm layer after each hidden
+        layer (default: False).
+
+    bn_is_training : bool (optional)
+        Flag for batch norm stage.
+    
+    latent_layer_fun : function (optional)
+        A function, taking a tensor as input and returning another tensor. It
+        can be used to modify the output of the encoder, before passing it to
+        the decoder. If None, the encoder's output will directly be passed to
+        the decoder.
 
     Returns
     -------
@@ -57,27 +83,56 @@ def build_autoencoder_graph(input_tensor, latent_size, n_hidden, activation, **k
 
     See Also
     --------
-    tfmodels.build_mlp_graph : Used to construct the encoder and decoder
-                              sub-networks of the autoencoder.
+    tfmodellib.build_mlp_graph : Used to construct the encoder and decoder
+                                 sub-networks of the autoencoder.
     """
 
     # define encoder
-    latent_layer = build_mlp_graph(
-            input_tensor=input_tensor,
-            out_size=latent_size,
-            n_hidden=n_hidden,
-            activation=activation)
+    with tf.variable_scope('encoder'):
+        encoder_out = build_mlp_graph(
+                input_tensor=input_tensor,
+                out_size=encoder_size[-1],
+                n_hidden=encoder_size[:-1],
+                hidden_activation=hidden_activation,
+                output_activation=hidden_activation,
+                use_dropout=use_dropout,
+                use_bn=use_bn,
+                bn_is_training=bn_is_training)
+
+        if use_bn:
+            encoder_out = tf.layers.batch_normalization(encoder_out, training=bn_is_training, name='batchnorm_encoder_out')
+
+    if latent_layer_fun is not None:
+        with tf.variable_scope('latent_layers'):
+            latent_layer = latent_layer_fun(encoder_out)
+    else:
+        latent_layer = encoder_out
 
     # define decoder
-    n_hidden.reverse()
-    reconstruction = build_mlp_graph(
-            input_tensor=latent_layer,
-            out_size=input_tensor.shape.as_list()[1],
-            n_hidden=n_hidden,
-            activation=activation)
+    with tf.variable_scope('decoder'):
+
+        if decoder_size is None:
+            decoder_size = encoder_size
+            decoder_size.reverse()
+
+        decoder_out = build_mlp_graph(
+                input_tensor=latent_layer,
+                out_size=decoder_size[-1],
+                n_hidden=decoder_size[:-1],
+                hidden_activation=hidden_activation,
+                output_activation=hidden_activation,
+                use_dropout=use_dropout,
+                use_bn=use_bn,
+                bn_is_training=bn_is_training)
+
+        if use_bn:
+            decoder_out = tf.layers.batch_normalization(decoder_out, training=bn_is_training, name='batchnorm_decoder_out')
+
+        reconstruction = tf.layers.dense(
+                inputs=decoder_out, units=input_tensor.shape.as_list()[1],
+                activation=output_activation)
 
     return reconstruction
-
 
 
 class AutoEncoderConfig(TFModelConfig):
@@ -86,8 +141,13 @@ class AutoEncoderConfig(TFModelConfig):
         self.update(
                 in_size=3,
                 latent_size=2,
-                n_hidden=[10,10],
-                activation=tf.nn.relu)
+                encoder_size=[10,10],
+                decoder_size=[10,10],
+                hidden_activation=tf.nn.relu,
+                output_activation=None,
+                use_dropout=False,
+                use_bn=False,
+                latent_layer_fun=None)
 
 
 class AutoEncoder(MLP):
@@ -97,6 +157,7 @@ class AutoEncoder(MLP):
         # define input and target placeholder
         self.x_input = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']])
         self.y_target = tf.placeholder(dtype=tf.float32, shape=[None, self.config['in_size']])
+        self.bn_is_training = tf.placeholder(dtype=tf.bool, shape=[], name='bn_is_training')
 
         # define the base graph
         self.y_output = build_autoencoder_graph(input_tensor=self.x_input, **self.config)
@@ -121,9 +182,9 @@ if __name__ == '__main__':
 
     # create the model
     conf = AutoEncoderConfig(
-            log_level=logging.DEBUG,
-            n_hidden=[100,50,5],
-            latent_size=2)
+                in_size=3,
+                latent_size=2,
+                encoder_size=[10,10])
     model = AutoEncoder(conf)
 
     # generate some data
