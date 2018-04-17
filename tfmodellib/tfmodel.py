@@ -184,6 +184,7 @@ class TFModel(object):
     def _init_from_config(self, config):
 
         self.config = config
+        self.summaries = dict()
 
         self.graph = tf.Graph()
         with self.graph.as_default():
@@ -246,6 +247,23 @@ class TFModel(object):
                     self.config['log_file'], mode='w')
             self.logger.addHandler(self.logger_file_handler)
 
+    def valid_summary_modes(self):
+        return ('epoch', 'step')
+
+    def add_summary(self, tag, key=None, mode='epoch'):
+        if mode not in self.valid_summary_modes():
+            self.logger.log(logging.WARNING, 'Invalid summary mode {:s}, ignoring.'.format(which))
+        else:
+            if key is None:
+                key = tag
+            self.summaries[key] = (float(), mode)
+
+    def update_summary(self, key, val):
+        if key not in self.summary_values.keys():
+            self.logger.log(logging.WARNING, 'Invalid summary key "{:s}", skipping.'.format(key))
+        else:
+            self.summary_values[key][0].simple_value = val
+
     def init_summaries(self):
         if self.config['summaries_root'] is not None:
             summaries_root = os.path.realpath(self.config['summaries_root'])
@@ -257,39 +275,30 @@ class TFModel(object):
             self.summary_fwriter = tf.summary.FileWriter(
                     logdir=os.path.join(summaries_root, str(self.summaries_ind)),
                     graph=self.sess.graph)
-            self.epoch_train_loss_summary_value = tf.Summary.Value(
-                    tag='({:s}) epoch training loss'.format(self.config['scope_name']), simple_value=0.0)
-            self.epoch_valid_loss_summary_value = tf.Summary.Value(
-                    tag='({:s}) epoch validation loss'.format(self.config['scope_name']), simple_value=0.0)
-            self.step_train_loss_summary_value = tf.Summary.Value(
-                    tag='({:s}) step training loss'.format(self.config['scope_name']), simple_value=0.0)
-            self.step_valid_loss_summary_value = tf.Summary.Value(
-                    tag='({:s}) step validation loss'.format(self.config['scope_name']), simple_value=0.0)
+
+            # add standard summaries
+            self.add_summary(tag='({:s}) epoch training loss'.format(self.config['scope_name']), key='epoch_train_loss', mode='epoch')
+            self.add_summary(tag='({:s}) epoch validation loss'.format(self.config['scope_name']), key='epoch_valid_loss', mode='epoch')
+            self.add_summary(tag='({:s}) step training loss'.format(self.config['scope_name']), key='step_train_loss', mode='step')
+            self.add_summary(tag='({:s}) step validation loss'.format(self.config['scope_name']), key='step_valid_loss', mode='step')
+
+            self.summary_values = dict([
+                    (tag, (tf.Summary.Value(tag=tag, simple_value=val[0]), val[1]))
+                    for tag, val in self.summaries.items()])
         else:
             self.summary_fwriter = None
 
-    def write_summary(self):
-        
-        global_step = self.get_global_step()
-        log_message = '{:9d}'.format(global_step)
-        log_message += '\ttrain loss: {:4.05f}'.format(self.last_training_loss)
-        if not np.isnan(self.last_validation_loss):
-            log_message += '\tvalidate: {:4.05f}'.format(self.last_validation_loss)
-        self.logger.log(logging.INFO, log_message)
-        sys.stderr.flush()
-
-        if self.summary_fwriter is not None:
-        
-            self.epoch_train_loss_summary_value.simple_value = self.last_training_loss
-            self.summary_fwriter.add_summary(
-                    tf.Summary(value=[self.epoch_train_loss_summary_value]),
-                    global_step=global_step)
-
-            if not np.isnan(self.last_validation_loss):
-                self.epoch_valid_loss_summary_value.simple_value = self.last_validation_loss
-                self.summary_fwriter.add_summary(
-                        tf.Summary(value=[self.epoch_valid_loss_summary_value]),
-                        global_step=global_step)
+    def write_summary(self, which):
+        if which not in self.valid_summary_modes():
+            self.logger.log(logging.WARNING, 'Invalid summary mode {:s}, ignoring.'.format(which))
+        else:
+            if self.summary_fwriter is not None:
+                value_list = [v for v,w in self.summary_values.values() if w == which]
+                if which == 'epoch':
+                    step = self.get_global_step()
+                elif which == 'step':
+                    step = self.sess.run(self.batch_step)
+                self.summary_fwriter.add_summary(tf.Summary(value=value_list), global_step=step)
 
     def get_saver_variables(self):
         """ Override this to only save specific variables in checkpoints. """
@@ -345,9 +354,9 @@ class TFModel(object):
             else:
                 result = result[0]
 
-        self.last_training_loss, self.last_validation_loss = result
+        training_loss, validation_loss = result
 
-        global_step = self.sess.run(self.increment_global_step_op)
+        global_step = self.get_global_step()
 
         if self.config['saver_interval'] is not None \
                 and global_step % self.config['saver_interval'] == 0:
@@ -355,9 +364,19 @@ class TFModel(object):
 
         if self.config['epoch_summaries_interval'] is not None \
                 and global_step % self.config['epoch_summaries_interval'] == 0:
-            self.write_summary()
+            self.update_summary('epoch_train_loss', training_loss)
+            self.update_summary('epoch_valid_loss', validation_loss)
+            self.write_summary(which='epoch')
 
-        return self.last_training_loss, self.last_validation_loss
+        # Write a bit of information to the log
+        log_message = '{:9d}'.format(global_step)
+        log_message += '\ttrain loss: {:4.05f}'.format(training_loss)
+        log_message += '\tvalidate: {:4.05f}'.format(validation_loss)
+        self.logger.log(logging.INFO, log_message)
+
+        global_step = self.sess.run(self.increment_global_step_op)
+
+        return training_loss, validation_loss
 
     def train_step(self, inds, train_inputs, train_targets, validation_inputs, validation_targets, *args, **kwargs):
         """
@@ -385,22 +404,17 @@ class TFModel(object):
                     batch_targets=validation_targets[validation_inds],
                     *args, **kwargs)
 
-        step_count = self.sess.run(self.increment_train_step_op)
+        step_count = self.sess.run(self.batch_step)
 
         if self.summary_fwriter is not None \
                 and self.config['step_summaries_interval'] is not None \
                 and step_count % self.config['step_summaries_interval'] == 0:
 
-            self.step_train_loss_summary_value.simple_value = training_loss
-            self.summary_fwriter.add_summary(
-                    tf.Summary(value=[self.step_train_loss_summary_value]),
-                    global_step=step_count)
+            self.update_summary('step_train_loss', training_loss)
+            self.update_summary('step_valid_loss', validation_loss)
+            self.write_summary(which='step')
 
-            if not np.isnan(validation_loss):
-                self.step_valid_loss_summary_value.simple_value = validation_loss
-                self.summary_fwriter.add_summary(
-                        tf.Summary(value=[self.step_valid_loss_summary_value]),
-                        global_step=step_count)
+        step_count = self.sess.run(self.increment_train_step_op)
 
         return training_loss, validation_loss
 
