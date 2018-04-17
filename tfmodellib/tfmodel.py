@@ -113,19 +113,11 @@ def maybe_chunked(values, length, on_chunked, on_not_chunked, *args, **kwargs):
 
 class TFModelConfigEncoder(json.JSONEncoder):
 
-    FUNCTION_TYPE = 'TFMODELLIB_TFMODEL_JSONENCODER__FUNCTION_TYPE'
-    CLASS_TYPE    = 'TFMODELLIB_TFMODEL_JSONENCODER__CLASS_TYPE'
+    CALLABLE_TYPE = 'TFMODELLIB_TFMODEL_JSONENCODER__CALLABLE_TYPE'
 
     def default(self, obj):
         if callable(obj):
-            if inspect.isclass(obj):
-                return TFModelConfigEncoder.CLASS_TYPE, \
-                        obj.__name__, \
-                        obj.__module__
-            else:
-                return TFModelConfigEncoder.FUNCTION_TYPE, \
-                        obj.__code__.co_name, \
-                        obj.__code__.co_filename
+            return TFModelConfigEncoder.CALLABLE_TYPE, obj.__name__, obj.__module__
         return json.JSONEncoder.default(self, obj)
 
 
@@ -167,16 +159,11 @@ class TFModelConfig(dict):
                 conf = json.load(fp)
             for key,val in conf.items():
                 if isinstance(val, list) and len(val) > 0:
-                    if val[0] == TFModelConfigEncoder.FUNCTION_TYPE:
+                    if val[0] == TFModelConfigEncoder.CALLABLE_TYPE:
                         if sys.version_info >= (3,4):
-                            spec = importlib.util.spec_from_file_location(val[1], val[2])
-                            module = importlib.util.module_from_spec(spec)
-                            spec.loader.exec_module(module)
-                            conf[key] = module.__dict__[val[1]]
+                            conf[key] = importlib.import_module(val[2]).__dict__[val[1]]
                         else:
                             raise NotImplementedError('Restoring function handles from checkpoints only implemented for Python versions 3.4 and newer.')
-                    elif val[0] == TFModelConfigEncoder.CLASS_TYPE:
-                        conf[key] = importlib.import_module(val[2]).__dict__[val[1]]
             self.update(**conf)
         except Exception as e:
             print(e)
