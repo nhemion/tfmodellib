@@ -29,8 +29,7 @@ class ConvVAE2dConfig(VAEConfig, CAE2dConfig):
                 dense_encoder_size=self.pop('encoder_size'),
                 dense_decoder_size=self.pop('decoder_size'),
                 dense_hidden_activation=self.pop('hidden_activation'),
-                dense_output_activation=self.pop('output_activation'),
-                conv_layer_activation=None)
+                dense_output_activation=self.pop('output_activation'))
 
 
 class ConvVAE2d(TFModel):
