@@ -20,7 +20,7 @@ import tensorflow as tf
 
 @graph_def
 @docsig
-def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_fun=None):
+def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, latent_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_fun=None):
     """
     Defines an autoencoder graph, with `len(encoder_size)+1+len(decoder_size)`
     dense layers:
@@ -55,6 +55,9 @@ def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_siz
     hidden_activation : function (optional)
         Activation function for the encoder- and decoder-layers (default:
         tf.nn.relu).
+
+    latent_activation : function (optional)
+        Activation function for the latent (code) layer (default: tf.nn.relu).
 
     output_activation : function (optional)
         Activation function for the output layer (default: linear activation).
@@ -91,10 +94,10 @@ def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_siz
     with tf.variable_scope('encoder'):
         encoder_out = build_mlp_graph(
                 input_tensor=input_tensor,
-                out_size=encoder_size[-1],
-                n_hidden=encoder_size[:-1],
+                out_size=latent_size,
+                n_hidden=encoder_size,
                 hidden_activation=hidden_activation,
-                output_activation=hidden_activation,
+                output_activation=latent_activation,
                 use_dropout=use_dropout,
                 use_bn=use_bn,
                 bn_is_training=bn_is_training)
@@ -144,10 +147,12 @@ class AutoEncoderConfig(TFModelConfig):
                 encoder_size=[10,10],
                 decoder_size=[10,10],
                 hidden_activation=tf.nn.relu,
+                latent_activation=tf.nn.relu,
                 output_activation=None,
                 use_dropout=False,
                 use_bn=False,
                 latent_layer_fun=None)
+        super(AutoEncoderConfig, self).init()
 
 
 class AutoEncoder(MLP):
