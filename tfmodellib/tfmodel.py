@@ -355,6 +355,8 @@ class TFModel(object):
             else:
                 result = result[0]
 
+        self.on_epoch_done()
+
         training_loss, validation_loss = result
 
         global_step = self.get_global_step()
@@ -378,6 +380,13 @@ class TFModel(object):
         global_step = self.sess.run(self.increment_global_step_op)
 
         return training_loss, validation_loss
+
+    def on_epoch_done(self):
+        """
+        Can be overwritten by child class to run any logic once after each call
+        of train() is completed.
+        """
+        pass
 
     def train_step(self, inds, train_inputs, train_targets, validation_inputs, validation_targets, *args, **kwargs):
         """
@@ -405,6 +414,8 @@ class TFModel(object):
                     batch_targets=validation_targets[validation_inds],
                     *args, **kwargs)
 
+        self.on_train_step_done()
+
         step_count = self.sess.run(self.batch_step)
 
         if self.summary_fwriter is not None \
@@ -418,6 +429,13 @@ class TFModel(object):
         step_count = self.sess.run(self.increment_train_step_op)
 
         return training_loss, validation_loss
+
+    def on_train_step_done(self):
+        """
+        Can be overwritten by child class to run any logic once after each call
+        of train_step() is completed.
+        """
+        pass
 
     def infer(self, inputs, batch_size=None, *args, **kwargs):
         result, was_chunked = maybe_chunked(
