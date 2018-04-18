@@ -169,7 +169,6 @@ if __name__ == '__main__':
                 n_filters=[50,50],
                 kernel_sizes=[3,3],
                 strides=[1,1],
-                conv_activation=tf.nn.relu,
                 pooling_sizes=[2,2],
                 conv_hidden_activation=tf.nn.relu,
                 conv_latent_activation=tf.nn.relu,
