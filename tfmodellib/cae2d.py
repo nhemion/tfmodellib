@@ -18,6 +18,230 @@ from tfmodellib import TFModel, TFModelConfig, graph_def, docsig
 import tensorflow as tf
 
 
+@graph_def
+@docsig
+def build_conv_encoder_2d_graph(
+        input_tensor, n_filters, kernel_sizes, strides,
+        nonlinearity=tf.nn.relu, pooling_sizes=None,
+        pooling_fun=tf.nn.avg_pool, use_dropout=False, use_bn=False):
+    """
+    Defines a convolutional encoder graph, with `len(n_filters)` convolutional
+    layers.
+
+    The parameters `n_filters`, `kernel_sizes`, and `strides` are lists of
+    length equal to the number of layers in both the encoder and decoder.
+    Elements of the lists correspond to parameters passed to tf.layers.conv2d
+    (`filters`, `kernel_size`, and `stride`, respectively).
+
+    Parameters
+    ----------
+    input_tensor : Tensor
+        The input tensor of size NUM_SAMPLES x HEIGHT x WIDTH x NUM_FILTERS.
+
+    n_filters : list
+        List of ints, specifying the number of filters for each convolutional
+        layer.
+
+    kernel_sizes : list
+        List of ints, or a list of tuples/lists of 2 integers, specifying the
+        height and width of the 2D convolution window.
+
+    strides : list
+        List of inds, or a list of tuples/lists of 2 integers, specifying the
+        stride of the convolution along the HEIGHT and WIDTH dimensions.
+
+    nonlinearity : function
+        A nonlinearity to apply to the output of the convolution layer (or
+        alternatively to the output of the batch normalization step, if use_bn
+        is True). If None, no nonlinearity will be applied.
+
+    pooling_sizes : list (optional)
+        List where elements can be either int or None. Specifies for each layer
+        if the convolution should be followed by an average pooling step. If a
+        list element is an int, it indicates the size of the pooling window
+        along the WIDTH and HEIGHT dimension of the input. If a list element is
+        None, no pooling is for the corresponding layer. Alternatively, passing
+        None as argument switches pooling off for the whole network (the
+        default).
+
+    pooling_fun : function (optional)
+        The pooling function to use (default: tf.nn.avg_pool).
+
+    use_dropout : bool (optional)
+        Indicates whether or not to use dropout after each convolution layer
+        (default: False).
+    
+    use_bn : bool (optional)
+        Indicates whether or not to add a batch norm layer after each
+        convolution layer (default: False).
+
+    Returns
+    -------
+    encoder_output : Tensor
+        The encoder's output.
+    """
+
+    current_input = input_tensor
+
+    # build the encoder
+    for ind, fs in enumerate(n_filters):
+
+        current_input = tf.layers.conv2d(
+                current_input, filters=fs,
+                kernel_size=kernel_sizes[ind], strides=strides[ind],
+                use_bias=False, padding='same', name='conv{:d}'.format(ind))
+
+        if use_dropout:
+            current_input = tf.layers.dropout(current_input, name='encoder_dropout_layer_{:d}'.format(ind))
+
+        if use_bn:
+            current_input = tf.layers.batch_normalization(current_input, name='encoder_batch_normalization_{:d}'.format(ind))
+
+        if nonlinearity is not None:
+            current_input = nonlinearity(current_input)
+
+        if pooling_sizes is not None and pooling_sizes[ind] is not None:
+            current_input = pooling_fun(
+                    current_input,
+                    ksize=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
+                    strides=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
+                    padding='SAME')
+
+    encoder_output = current_input
+
+    return encoder_output
+
+
+def params_encoder_to_decoder(input_tensor, n_filters_encoder,
+        kernel_sizes_encoder, strides_encoder, pooling_sizes_encoder):
+
+    input_shape = input_tensor.get_shape().as_list()
+
+    # for the decoder, the number of output filters for each layer equals the
+    # number of input filters of the corresponding layer in the encoder. Thus,
+    # we insert the number of filters of the input tensor at the beginning of
+    # the n_filters list, and remove the last element of the list.
+    n_filters_decoder    = [n_filters_encoder[ind]    for ind in reversed(range(len(n_filters_encoder)-1))] + [input_shape[-1]]
+
+    # reverse kernel sizes and strides
+    kernel_sizes_decoder = [kernel_sizes_encoder[ind] for ind in reversed(range(len(n_filters_encoder)))]
+    strides_decoder      = [strides_encoder[ind]      for ind in reversed(range(len(n_filters_encoder)))]
+
+    # reconstruct filter map sizes based on the encoder's pooling sizes
+    unpooling_sizes = None
+    if pooling_sizes_encoder is not None:
+        unpooling_sizes = [input_shape[1:3]]
+        for pooling_size in pooling_sizes_encoder[:-1]:
+            if pooling_size is not None:
+                if isinstance(pooling_size, list) or isinstance(pooling_size, tuple):
+                    pooling_size_u, pooling_size_v = pooling_size
+                else:
+                    pooling_size_u = pooling_size_v = pooling_size
+                size_u = 1+(unpooling_sizes[-1][0]-1)//pooling_size_u
+                size_v = 1+(unpooling_sizes[-1][1]-1)//pooling_size_v
+                unpooling_sizes.append((size_u,size_v))
+            else:
+                unpooling_sizes.append(None)
+        unpooling_sizes.reverse()
+
+    return n_filters_decoder, kernel_sizes_decoder, strides_decoder, unpooling_sizes
+
+
+@graph_def
+@docsig
+def build_conv_decoder_2d_graph(
+        input_tensor, n_filters, kernel_sizes, strides, 
+        nonlinearity=tf.nn.relu, unpooling_sizes=None,
+        unpooling_fun=tf.image.resize_images, use_dropout=False, use_bn=False):
+    """
+    Defines a convolutional decoder graph, with `len(n_filters)` deconvolution
+    layers.
+
+    The parameters `n_filters`, `kernel_sizes`, and `strides` are lists of
+    length equal to the number of layers in both the encoder and decoder.
+    Elements of the lists correspond to parameters passed to
+    tf.layers.conv2d_transpose (`filters`, `kernel_size`, and `stride`,
+    respectively).
+
+    Parameters
+    ----------
+    input_tensor : Tensor
+        The input tensor of size NUM_SAMPLES x HEIGHT x WIDTH x NUM_FILTERS.
+
+    n_filters : list
+        List of ints, specifying the number of filters for each deconvolution
+        layer.
+
+    kernel_sizes : list
+        List of ints, or a list of tuples/lists of 2 integers, specifying the
+        height and width of the 2D deconvolution window.
+
+    strides : list
+        List of inds, or a list of tuples/lists of 2 integers, specifying the
+        stride of the deconvolution along the HEIGHT and WIDTH dimensions.
+
+    nonlinearity : function
+        A nonlinearity to apply to the output of the deconvolution layer (or
+        alternatively to the output of the batch normalization step, if use_bn
+        is True). If None, no nonlinearity will be applied.
+
+    unpooling_sizes : list (optional)
+        List where elements can be either int or None. Specifies for each layer
+        if the deconvolution should be followed by an unpooling step. If a
+        list element is an int, it indicates the size of the unpooling window
+        along the WIDTH and HEIGHT dimension of the input. If a list element is
+        None, no unpooling is for the corresponding layer. Alternatively, passing
+        None as argument switches unpooling off for the whole network (the
+        default).
+
+    unpooling_fun : function (optional)
+        The unpooling function to use (default: tf.image.resize_images).
+
+    use_dropout : bool (optional)
+        Indicates whether or not to use dropout after each deconvolution layer
+        (default: False).
+    
+    use_bn : bool (optional)
+        Indicates whether or not to add a batch norm layer after each
+        deconvolution layer (default: False).
+
+    Returns
+    -------
+    reconstruction : Tensor
+        The output (decoded input).
+    """
+
+    # build decoder
+
+    current_input = input_tensor
+
+    # iterate layers in reverse order
+    for ind, fs in enumerate(n_filters):
+
+        if unpooling_sizes is not None and unpooling_sizes[ind] is not None:
+            # upsampling unpooling
+            current_input = unpooling_fun(current_input, unpooling_sizes[ind])
+
+        # deconvolution
+        current_input = tf.layers.conv2d_transpose(
+                current_input, filters=fs,
+                kernel_size=kernel_sizes[ind], strides=strides[ind],
+                use_bias=False, padding='same', name='conv{:d}'.format(len(n_filters)-1-ind),
+                reuse=True)
+
+        if use_dropout:
+            current_input = tf.layers.dropout(current_input, name='decoder_dropout_layer_{:d}'.format(ind))
+
+        if use_bn:
+            current_input = tf.layers.batch_normalization(current_input, name='decoder_batch_normalization_{:d}'.format(ind))
+
+        if nonlinearity is not None:
+            current_input = nonlinearity(current_input)
+
+    reconstruction = current_input
+
+    return reconstruction
+
 
 @graph_def
 @docsig
@@ -92,60 +316,30 @@ def build_cae_2d_graph(
     tfmodels.build_autoencoder_graph : Standard (non-convolutional) autoencoder.
     """
 
-    input_n_filters = input_tensor.get_shape().as_list()[-1]
-    current_input = input_tensor
-
-    # build the encoder
-    map_dimensions = []
-    for ind, fs in enumerate(n_filters):
-
-        current_input = tf.layers.conv2d(
-                current_input, filters=fs,
-                kernel_size=kernel_sizes[ind], strides=strides[ind],
-                use_bias=False, padding='same', name='conv{:d}'.format(ind))
-
-        if use_bn:
-            current_input = tf.layers.batch_normalization(current_input)
-
-        if nonlinearity is not None:
-            current_input = nonlinearity(current_input)
-
-        map_dimensions.append(current_input.get_shape().as_list()[1:3])
-
-        if pooling_sizes is not None and pooling_sizes[ind] is not None:
-            current_input = pooling_fun(
-                    current_input,
-                    ksize=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
-                    strides=(1, pooling_sizes[ind], pooling_sizes[ind], 1),
-                    padding='SAME')
+    encoder_output = build_conv_encoder_2d_graph(
+            input_tensor=input_tensor, n_filters=n_filters,
+            kernel_sizes=kernel_sizes, strides=strides,
+            nonlinearity=nonlinearity, pooling_sizes=pooling_sizes,
+            pooling_fun=pooling_fun, use_dropout=use_dropout, use_bn=use_bn)
 
     # apply latent_op to the latent code
     if latent_op is not None:
-        current_input = latent_op(current_input)
+        decoder_input = latent_op(encoder_output)
+    else:
+        decoder_input = encoder_output
 
-    # build decoder
+    n_filters_decoder, \
+    kernel_sizes_decoder, \
+    strides_decoder, \
+    unpooling_sizes = params_encoder_to_decoder(
+            input_tensor, n_filters, kernel_sizes, strides, pooling_sizes)
 
-    # for the decoder, the number of output filters for each layer equals the
-    # number of input filters of the corresponding layer in the encoder. Thus,
-    # we insert the number of filters of the input tensor at the beginning of
-    # the n_filters list, and remove the last element of the list.
-    n_filters = [input_n_filters] + n_filters[:-1]
-
-    # iterate layers in reverse order
-    for ind in reversed(range(len(n_filters))):
-
-        if pooling_sizes is not None and pooling_sizes[ind] is not None:
-            # upsampling unpooling
-            current_input = unpooling_fun(current_input, map_dimensions[ind])
-
-        # deconvolution
-        current_input = tf.layers.conv2d_transpose(
-                current_input, filters=n_filters[ind],
-                kernel_size=kernel_sizes[ind], strides=strides[ind],
-                use_bias=False, padding='same', name='conv{:d}'.format(ind),
-                reuse=True)
-
-    reconstruction = current_input
+    reconstruction = build_conv_decoder_2d_graph(
+            input_tensor=decoder_input, n_filters=n_filters_decoder,
+            kernel_sizes=kernel_sizes_decoder, strides=strides_decoder,
+            nonlinearity=nonlinearity, unpooling_sizes=unpooling_sizes,
+            unpooling_fun=unpooling_fun, use_dropout=use_dropout,
+            use_bn=use_bn)
 
     return reconstruction
 
