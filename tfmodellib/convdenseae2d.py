@@ -23,12 +23,19 @@ class ConvDenseAE2dConfig(AutoEncoderConfig, CAE2dConfig):
     def init(self):
         super(ConvDenseAE2dConfig, self).init()
         # a bit of renaming to disambiguate meaning of parameters
+        hidden_activation = self.pop('hidden_activation')
+        latent_activation = self.pop('latent_activation')
+        encoder_size      = self.pop('encoder_size')
+        decoder_size      = self.pop('decoder_size')
+        output_activation = self.pop('output_activation')
         self.update(
-                conv_activation=self.pop('nonlinearity'),
-                dense_encoder_size=self.pop('encoder_size'),
-                dense_decoder_size=self.pop('decoder_size'),
-                dense_hidden_activation=self.pop('hidden_activation'),
-                dense_output_activation=self.pop('output_activation'))
+                conv_hidden_activation=hidden_activation,
+                conv_latent_activation=latent_activation,
+                conv_output_activation=output_activation,
+                dense_encoder_size=encoder_size,
+                dense_decoder_size=decoder_size,
+                dense_hidden_activation=hidden_activation,
+                dense_output_activation=hidden_activation)
 
 class ConvDenseAE2d(CAE2d):
 
@@ -42,7 +49,9 @@ class ConvDenseAE2d(CAE2d):
         # define the base graph
         self.y_output = build_cae_2d_graph(
                 input_tensor=self.x_input,
-                nonlinearity=self.config['conv_activation'],
+                hidden_activation=self.config['conv_hidden_activation'],
+                latent_activation=self.config['conv_latent_activation'],
+                output_activation=self.config['conv_output_activation'],
                 latent_op=self._get_build_ae_op(),
                 bn_is_training=self.bn_is_training,
                 **self.config)
@@ -128,14 +137,15 @@ if __name__ == '__main__':
                 n_filters=[30,20],
                 kernel_sizes=[5,5],
                 strides=[1,1],
-                conv_activation=tf.nn.relu,
                 pooling_sizes=[2,2],
+                conv_hidden_activation=tf.nn.relu,
+                conv_latent_activation=tf.nn.relu,
+                conv_output_activation=None,
                 dense_encoder_size=[10,10],
                 dense_decoder_size=[10,10],
                 latent_size=3,
                 dense_hidden_activation=tf.nn.relu,
-                latent_activation=None,
-                dense_output_activation=None,
+                dense_output_activation=tf.nn.relu,
                 latent_layer_fun=latent_op)
         model = ConvDenseAE2d(conf)
 
