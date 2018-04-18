@@ -22,8 +22,9 @@ import tensorflow as tf
 @docsig
 def build_conv_encoder_2d_graph(
         input_tensor, n_filters, kernel_sizes, strides,
-        nonlinearity=tf.nn.relu, pooling_sizes=None,
-        pooling_fun=tf.nn.avg_pool, use_dropout=False, use_bn=False):
+        hidden_activation=tf.nn.relu, latent_activation=None,
+        pooling_sizes=None, pooling_fun=tf.nn.avg_pool, use_dropout=False,
+        use_bn=False):
     """
     Defines a convolutional encoder graph, with `len(n_filters)` convolutional
     layers.
@@ -50,10 +51,16 @@ def build_conv_encoder_2d_graph(
         List of inds, or a list of tuples/lists of 2 integers, specifying the
         stride of the convolution along the HEIGHT and WIDTH dimensions.
 
-    nonlinearity : function
-        A nonlinearity to apply to the output of the convolution layer (or
-        alternatively to the output of the batch normalization step, if use_bn
-        is True). If None, no nonlinearity will be applied.
+    hidden_activation : function (optional)
+        Activation function to apply to the output of each convolution layer
+        (or alternatively to the output of the batch normalization step, if
+        use_bn is True). If None, no nonlinearity will be applied. Default is
+        tf.nn.relu.
+
+    latent_activation : function (optional)
+        Activation function to apply to the output layer of the encoder (the
+        latent code layer). If None, no nonlinearity will be applied (the
+        default).
 
     pooling_sizes : list (optional)
         List where elements can be either int or None. Specifies for each layer
@@ -96,6 +103,11 @@ def build_conv_encoder_2d_graph(
 
         if use_bn:
             current_input = tf.layers.batch_normalization(current_input, name='encoder_batch_normalization_{:d}'.format(ind))
+
+        if ind < len(n_filters)-1:
+            nonlinearity = hidden_activation
+        else:
+            nonlinearity = latent_activation
 
         if nonlinearity is not None:
             current_input = nonlinearity(current_input)
@@ -151,8 +163,9 @@ def params_encoder_to_decoder(input_tensor, n_filters_encoder,
 @docsig
 def build_conv_decoder_2d_graph(
         input_tensor, n_filters, kernel_sizes, strides, 
-        nonlinearity=tf.nn.relu, unpooling_sizes=None,
-        unpooling_fun=tf.image.resize_images, use_dropout=False, use_bn=False):
+        hidden_activation=tf.nn.relu, output_activation=None,
+        unpooling_sizes=None, unpooling_fun=tf.image.resize_images,
+        use_dropout=False, use_bn=False):
     """
     Defines a convolutional decoder graph, with `len(n_filters)` deconvolution
     layers.
@@ -180,10 +193,16 @@ def build_conv_decoder_2d_graph(
         List of inds, or a list of tuples/lists of 2 integers, specifying the
         stride of the deconvolution along the HEIGHT and WIDTH dimensions.
 
-    nonlinearity : function
-        A nonlinearity to apply to the output of the deconvolution layer (or
-        alternatively to the output of the batch normalization step, if use_bn
-        is True). If None, no nonlinearity will be applied.
+    hidden_activation : function (optional)
+        Activation function to apply to the output of each deconvolution layer
+        (or alternatively to the output of the batch normalization step, if
+        use_bn is True). If None, no nonlinearity will be applied. Default is
+        tf.nn.relu.
+
+    output_activation : function (optional)
+        Activation function to apply to the output layer. If None, no
+        nonlinearity will be applied (the default).
+
 
     unpooling_sizes : list (optional)
         List where elements can be either int or None. Specifies for each layer
@@ -235,6 +254,11 @@ def build_conv_decoder_2d_graph(
         if use_bn:
             current_input = tf.layers.batch_normalization(current_input, name='decoder_batch_normalization_{:d}'.format(ind))
 
+        if ind < len(n_filters)-1:
+            nonlinearity = hidden_activation
+        else:
+            nonlinearity = output_activation
+
         if nonlinearity is not None:
             current_input = nonlinearity(current_input)
 
@@ -247,7 +271,8 @@ def build_conv_decoder_2d_graph(
 @docsig
 def build_cae_2d_graph(
         input_tensor,
-        n_filters, kernel_sizes, strides, nonlinearity=tf.nn.relu,
+        n_filters, kernel_sizes, strides, hidden_activation=tf.nn.relu,
+        latent_activation=tf.nn.relu, output_activation=None,
         pooling_sizes=None, pooling_fun=tf.nn.avg_pool,
         unpooling_fun=tf.image.resize_images, use_dropout=False, use_bn=False,
         latent_op=None):
@@ -319,7 +344,8 @@ def build_cae_2d_graph(
     encoder_output = build_conv_encoder_2d_graph(
             input_tensor=input_tensor, n_filters=n_filters,
             kernel_sizes=kernel_sizes, strides=strides,
-            nonlinearity=nonlinearity, pooling_sizes=pooling_sizes,
+            hidden_activation=hidden_activation,
+            latent_activation=latent_activation, pooling_sizes=pooling_sizes,
             pooling_fun=pooling_fun, use_dropout=use_dropout, use_bn=use_bn)
 
     # apply latent_op to the latent code
@@ -337,9 +363,10 @@ def build_cae_2d_graph(
     reconstruction = build_conv_decoder_2d_graph(
             input_tensor=decoder_input, n_filters=n_filters_decoder,
             kernel_sizes=kernel_sizes_decoder, strides=strides_decoder,
-            nonlinearity=nonlinearity, unpooling_sizes=unpooling_sizes,
-            unpooling_fun=unpooling_fun, use_dropout=use_dropout,
-            use_bn=use_bn)
+            hidden_activation=hidden_activation,
+            output_activation=output_activation,
+            unpooling_sizes=unpooling_sizes, unpooling_fun=unpooling_fun,
+            use_dropout=use_dropout, use_bn=use_bn)
 
     return reconstruction
 
@@ -353,7 +380,9 @@ class CAE2dConfig(TFModelConfig):
                 n_filters=[10,10],
                 kernel_sizes=[3,3],
                 strides=[1,1],
-                nonlinearity=tf.nn.relu,
+                hidden_activation=tf.nn.relu,
+                latent_activation=tf.nn.relu,
+                output_activation=None,
                 pooling_sizes=None,
                 pooling_fun=tf.nn.avg_pool,
                 unpooling_fun=tf.image.resize_images,
@@ -429,12 +458,10 @@ if __name__ == '__main__':
 
         # create the model
         conf = CAE2dConfig(
-                log_level=logging.DEBUG,
                 in_size=[28,28,1],
                 n_filters=[30,20],
                 kernel_sizes=[5,5],
                 strides=[1,1],
-                nonlinearity=tf.nn.relu,
                 pooling_sizes=[2,2],
                 use_dropout=True,
                 use_bn=True)
