@@ -23,7 +23,7 @@ import tensorflow as tf
 def build_conv_encoder_2d_graph(
         input_tensor, n_filters, kernel_sizes, strides,
         hidden_activation=tf.nn.relu, latent_activation=None,
-        pooling_sizes=None, use_bias=False, pooling_fun=tf.nn.avg_pool,
+        pooling_sizes=None, use_bias=True, pooling_fun=tf.nn.avg_pool,
         use_dropout=False, use_bn=False):
     """
     Defines a convolutional encoder graph, with `len(n_filters)` convolutional
@@ -75,7 +75,7 @@ def build_conv_encoder_2d_graph(
         The pooling function to use (default: tf.nn.avg_pool).
 
     use_bias : bool (optional)
-        Whether or not to use a bias in the convolution layers (default is False).
+        Whether or not to use a bias in the convolution layers (default is True).
 
     use_dropout : bool (optional)
         Indicates whether or not to use dropout after each convolution layer
@@ -168,7 +168,7 @@ def build_conv_decoder_2d_graph(
         input_tensor, n_filters, kernel_sizes, strides, 
         hidden_activation=tf.nn.relu, output_activation=None,
         unpooling_sizes=None, unpooling_fun=tf.image.resize_images,
-        use_bias=False, reuse=True, use_dropout=False, use_bn=False):
+        use_bias=True, reuse=False, use_dropout=False, use_bn=False):
     """
     Defines a convolutional decoder graph, with `len(n_filters)` deconvolution
     layers.
@@ -220,11 +220,11 @@ def build_conv_decoder_2d_graph(
         The unpooling function to use (default: tf.image.resize_images).
 
     use_bias : bool (optional)
-        Whether or not to use a bias in the deconvolution layers (default is False).
+        Whether or not to use a bias in the deconvolution layers (default is True).
 
     reuse : bool (optional)
         Whether or not to reuse wights from the encoder. Not compatible with
-        use_bias=True. (default is True).
+        use_bias=True. (default is False).
 
     use_dropout : bool (optional)
         Indicates whether or not to use dropout after each deconvolution layer
@@ -335,11 +335,11 @@ def build_cae_2d_graph(
 
     use_bias : bool (optional)
         Whether or not to use a bias in the (de-)convolution layers (default is
-        False).
+        True).
 
     reuse : bool (optional)
         Whether or not to reuse wights from the encoder in the decoder. Not compatible with
-        use_bias=True. (default is True).
+        use_bias=True. (default is False).
 
     use_dropout : bool (optional)
         Indicates whether or not to use dropout after each convolution layer
@@ -370,7 +370,7 @@ def build_cae_2d_graph(
             kernel_sizes=kernel_sizes, strides=strides,
             hidden_activation=hidden_activation,
             latent_activation=latent_activation, pooling_sizes=pooling_sizes,
-            pooling_fun=pooling_fun, use_bis=use_bias, use_dropout=use_dropout,
+            pooling_fun=pooling_fun, use_bias=use_bias, use_dropout=use_dropout,
             use_bn=use_bn)
 
     # apply latent_op to the latent code
