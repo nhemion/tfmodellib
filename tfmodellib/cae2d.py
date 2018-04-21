@@ -412,8 +412,8 @@ class CAE2dConfig(TFModelConfig):
                 pooling_sizes=None,
                 pooling_fun=tf.nn.avg_pool,
                 unpooling_fun=tf.image.resize_images,
-                use_bias=False,
-                reuse=True,
+                use_bias=True,
+                reuse=False,
                 use_dropout=False,
                 use_bn=False)
         super(CAE2dConfig, self).init()
