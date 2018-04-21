@@ -290,7 +290,7 @@ def build_cae_2d_graph(
         n_filters, kernel_sizes, strides, hidden_activation=tf.nn.relu,
         latent_activation=tf.nn.relu, output_activation=None,
         pooling_sizes=None, pooling_fun=tf.nn.avg_pool,
-        unpooling_fun=tf.image.resize_images, use_bias=False, reuse=True,
+        unpooling_fun=tf.image.resize_images, use_bias=True, reuse=False,
         use_dropout=False, use_bn=False, latent_op=None):
     """
     Defines a convolutional autoencoder graph, with `2*len(n_filters)`
@@ -491,8 +491,6 @@ if __name__ == '__main__':
                 kernel_sizes=[5,5],
                 strides=[1,1],
                 pooling_sizes=[2,2],
-                use_bias=True,
-                reuse=False,
                 use_dropout=True,
                 use_bn=True)
         model = CAE2d(conf)
