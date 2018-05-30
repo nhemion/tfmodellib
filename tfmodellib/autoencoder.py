@@ -20,7 +20,12 @@ import tensorflow as tf
 
 @graph_def
 @docsig
-def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, latent_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_fun=None):
+def build_autoencoder_graph(
+        input_tensor, latent_size, encoder_size, decoder_size=None,
+        hidden_activation=tf.nn.relu, latent_activation=tf.nn.relu,
+        output_activation=None, use_dropout=False, use_bn=False,
+        bn_is_training=False, latent_layer_fun=None, encoder_name='encoder',
+        decoder_name='decoder'):
     """
     Defines an autoencoder graph, with `len(encoder_size)+1+len(decoder_size)`
     dense layers:
@@ -91,7 +96,7 @@ def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_siz
     """
 
     # define encoder
-    with tf.variable_scope('encoder'):
+    with tf.variable_scope(encoder_name):
         encoder_out = build_mlp_graph(
                 input_tensor=input_tensor,
                 out_size=latent_size,
@@ -112,7 +117,7 @@ def build_autoencoder_graph(input_tensor, latent_size, encoder_size, decoder_siz
         latent_layer = encoder_out
 
     # define decoder
-    with tf.variable_scope('decoder'):
+    with tf.variable_scope(decoder_name):
 
         if decoder_size is None:
             decoder_size = encoder_size
