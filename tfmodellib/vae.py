@@ -56,7 +56,12 @@ def build_vae_latent_layers(input_tensor, units):
 
 @graph_def
 @docsig
-def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, hidden_activation=tf.nn.relu, output_activation=None, use_dropout=False, use_bn=False, bn_is_training=False, latent_layer_build_fun=build_vae_latent_layers):
+def build_vae_graph(
+        input_tensor, latent_size, encoder_size, decoder_size=None,
+        hidden_activation=tf.nn.relu, output_activation=None,
+        use_dropout=False, use_bn=False, bn_is_training=False,
+        latent_layer_build_fun=build_vae_latent_layers,
+        encoder_name='encoder', latent_name='latent_layers', decoder_name='decoder'):
     """
     Defines a VAE graph, with `len(encoder_size)+1+len(decoder_size)` dense
     layers:
@@ -123,7 +128,7 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
     """
 
     # define encoder
-    with tf.variable_scope('encoder'):
+    with tf.variable_scope(encoder_name):
         encoder_out = build_mlp_graph(
                 input_tensor=input_tensor,
                 out_size=encoder_size[-1],
@@ -137,7 +142,7 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
         if use_bn:
             encoder_out = tf.layers.batch_normalization(encoder_out, training=bn_is_training, name='batchnorm_encoder_out')
 
-    with tf.variable_scope('latent_layers'):
+    with tf.variable_scope(latent_name):
         latent_layer, \
         latent_mean, \
         latent_sigma, \
@@ -145,7 +150,7 @@ def build_vae_graph(input_tensor, latent_size, encoder_size, decoder_size=None, 
         latent_log_sigma_sq = build_vae_latent_layers(encoder_out, latent_size)
 
     # define decoder
-    with tf.variable_scope('decoder'):
+    with tf.variable_scope(decoder_name):
 
         if decoder_size is None:
             decoder_size = encoder_size

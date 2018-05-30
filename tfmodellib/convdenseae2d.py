@@ -16,6 +16,7 @@
 from tfmodellib import CAE2d, CAE2dConfig, build_cae_2d_graph, AutoEncoder, AutoEncoderConfig, build_autoencoder_graph
 
 import tensorflow as tf
+import numpy as np
 
 
 class ConvDenseAE2dConfig(AutoEncoderConfig, CAE2dConfig):
@@ -52,6 +53,8 @@ class ConvDenseAE2d(CAE2d):
                 hidden_activation=self.config['conv_hidden_activation'],
                 latent_activation=self.config['conv_latent_activation'],
                 output_activation=self.config['conv_output_activation'],
+                encoder_name='conv_encoder',
+                decoder_name='conv_decoder',
                 latent_op=self._get_build_ae_op(),
                 bn_is_training=self.bn_is_training,
                 **self.config)
@@ -84,6 +87,8 @@ class ConvDenseAE2d(CAE2d):
                     output_activation=self.config['dense_output_activation'],
                     bn_is_training=self.bn_is_training,
                     latent_layer_fun=self.latent_layer_fun,
+                    encoder_name='dense_encoder',
+                    decoder_name='dense_decoder',
                     **dict([(k,v) for k,v in self.config.items()   # to avoid double
                             if k is not 'latent_layer_fun']))      # keyword argument
 

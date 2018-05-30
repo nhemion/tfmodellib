@@ -127,15 +127,18 @@ class TFModelConfig(dict):
     def __init__(self, *args, **kwargs):
 
         self.defaults = {
-            'summaries_root': None,
-            'checkpoints_root': None,
+            'summaries_root':           None,
+            'checkpoints_root':         None,
             'epoch_summaries_interval': 1,
-            'step_summaries_interval': None,
-            'saver_interval': None,
-            'saver_max_to_keep': 50,
-            'scope_name': 'tfmodel',
-            'log_level': logging.DEBUG,
-            'log_file': None
+            'step_summaries_interval':  None,
+            'saver_interval':           None,
+            'saver_max_to_keep':        50,
+            'scope_name':               'tfmodel',
+            'log_level':                logging.DEBUG,
+            'log_file':                 None,
+            'batch_size':               32,
+            'prefetch':                 None,
+            'shuffle_buffer':           None
         }
 
         self.update(self.defaults)
@@ -187,7 +190,10 @@ class TFModel(object):
         self.summaries = dict()
 
         self.graph = tf.Graph()
+        self.sess = tf.Session(graph=self.graph)
+
         with self.graph.as_default():
+            self.init_datasets()
             self.build_graph()
 
         # add common elements to the graph
@@ -203,8 +209,6 @@ class TFModel(object):
                         initial_value=0, trainable=False,
                         dtype=tf.int32, name='train_step')
                 self.increment_train_step_op = tf.assign_add(self.batch_step, 1)
-        
-        self.sess = tf.Session(graph=self.graph)
         
         self.init_logger()
         self.init_summaries()
@@ -235,6 +239,66 @@ class TFModel(object):
 
     def run_output(self, inputs, *args, **kwargs):
         raise NotImplementedError('run_output must be implemented by child class')
+
+    def load_data(self):
+        """
+        Overload in child class to enable use of tf.Dataset instead of
+        feed_dict logic. Simply return the training and validation datasets.
+        """
+        return None, None, None, None
+
+    def init_datasets(self):
+
+        data = self.load_data()
+
+        if data[0] is not None:
+
+            with tf.device('/cpu:0'):
+                self.traindata_input   = tf.placeholder(dtype=tf.as_dtype(data[0].dtype), shape=data[0].shape)
+                self.traindata_target  = tf.placeholder(dtype=tf.as_dtype(data[1].dtype), shape=data[1].shape)
+                self.trainset          = tf.data.Dataset.from_tensor_slices((self.traindata_input, self.traindata_target))
+                self.trainset          = self.trainset.repeat()
+                if self.config['prefetch'] is not None:
+                    self.trainset      = self.trainset.prefetch(self.config['prefetch'])
+                if self.config['shuffle_buffer'] is not None:
+                    self.trainset      = self.trainset.shuffle(self.config['shuffle_buffer'])
+                self.trainset          = self.trainset.batch(self.config['batch_size'])
+                self.trainset_iterator = self.trainset.make_initializable_iterator()
+                self.next_train_batch  = self.trainset_iterator.get_next()
+                self.num_batches       = data[0].shape[0] // self.config['batch_size']
+                self.sess.run(
+                        self.trainset_iterator.initializer,
+                        feed_dict={
+                                self.traindata_input:  data[0],
+                                self.traindata_target: data[1]})
+
+                if data[2] is not None:
+                    self.validdata_input   = tf.placeholder(dtype=tf.as_dtype(data[2].dtype), shape=data[2].shape)
+                    self.validdata_target  = tf.placeholder(dtype=tf.as_dtype(data[3].dtype), shape=data[3].shape)
+                    self.validset          = tf.data.Dataset.from_tensor_slices((self.validdata_input, self.validdata_target))
+                    self.validset          = self.validset.repeat()
+                    if self.config['prefetch'] is not None:
+                        self.validset      = self.validset.prefetch(self.config['prefetch'])
+                    if self.config['shuffle_buffer'] is not None:
+                        self.validset      = self.validset.shuffle(self.config['shuffle_buffer'])
+                    self.validset          = self.validset.batch(self.config['batch_size'])
+                    self.validset_iterator = self.validset.make_initializable_iterator()
+                    self.next_valid_batch  = self.validset_iterator.get_next()
+                    self.sess.run(
+                            self.validset_iterator.initializer,
+                            feed_dict={
+                                    self.validdata_input:  data[2],
+                                    self.validdata_target: data[3]})
+                else:
+                    self.next_valid_batch  = None
+
+        else:
+            self.trainset              = None
+            self.next_train_batch      = None
+            self.next_valid_batch      = None
+
+    def get_next_batch_op(self):
+        return self.next_train_batch, self.next_valid_batch
 
     def init_logger(self):
         self.logger = logging.Logger(
@@ -329,31 +393,44 @@ class TFModel(object):
     def get_global_step(self):
         return self.sess.run(self.global_step)
 
-    def train(self, train_inputs, train_targets, validation_inputs=None, validation_targets=None, batch_size=None, *args, **kwargs):
-        n_samples = train_inputs.shape[0]
-        inds = np.random.permutation(range(n_samples))
-        if validation_inputs is not None:
-            # Training is done in mini-batches. We will draw an equal number of
-            # validation samples as we have training samples, and will then
-            # split both sets into mini-batches.
-            validation_inds = np.random.randint(0, validation_inputs.shape[0], n_samples)
-            # Stack the training and validation indices into a 2xN_SAMPLES
-            # matrix, which will later be divided into mini-batches of size
-            # 2xBATCH_SIZE.
-            inds = np.vstack((inds, validation_inds)).T
-        
-        result, was_chunked = maybe_chunked(
-                inds, batch_size,
-                self.train_step, self.train_step,
-                train_inputs, train_targets,
-                validation_inputs, validation_targets,
-                *args, **kwargs)
+    def train(self, train_inputs=None, train_targets=None, validation_inputs=None, validation_targets=None, batch_size=None, *args, **kwargs):
 
-        if was_chunked:
-            if len(result) > 1:
-                result = np.mean(result, axis=0)
-            else:
-                result = result[0]
+        if self.trainset is None:
+
+            if train_inputs is None or train_targets is None:
+                raise ValueError('train_inputs and train_targets must not be None.')
+
+            n_samples = train_inputs.shape[0]
+            inds = np.random.permutation(range(n_samples))
+            if validation_inputs is not None:
+                # Training is done in mini-batches. We will draw an equal number of
+                # validation samples as we have training samples, and will then
+                # split both sets into mini-batches.
+                validation_inds = np.random.randint(0, validation_inputs.shape[0], n_samples)
+                # Stack the training and validation indices into a 2xN_SAMPLES
+                # matrix, which will later be divided into mini-batches of size
+                # 2xBATCH_SIZE.
+                inds = np.vstack((inds, validation_inds)).T
+            
+            result, was_chunked = maybe_chunked(
+                    inds, batch_size,
+                    self.train_step, self.train_step,
+                    train_inputs, train_targets,
+                    validation_inputs, validation_targets,
+                    *args, **kwargs)
+
+            if was_chunked:
+                if len(result) > 1:
+                    result = np.mean(result, axis=0)
+                elif len(result) == 1:
+                    result = result[0]
+
+        else:
+
+            result = np.mean([
+                self.train_step(None, None, None, None, None, *args, **kwargs)
+                for _ in range(self.num_batches)],
+                axis=0)
 
         self.on_epoch_done()
 
@@ -390,29 +467,38 @@ class TFModel(object):
 
     def train_step(self, inds, train_inputs, train_targets, validation_inputs, validation_targets, *args, **kwargs):
         """
-        The actual training. INDS specifies the indices of the samples to use
-        as a mini-batch.
         """
 
-        if validation_inputs is not None:
-            training_inds, validation_inds = inds.T
-        else:
-            training_inds = inds
+        if inds is not None:
+            # INDS specifies the indices of the samples to use as a mini-batch.
+
+            if validation_inputs is not None:
+                training_inds, validation_inds = inds.T
+            else:
+                training_inds = inds
  
-        with self.graph.as_default():
-            with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
-                training_loss = self.run_update_and_loss(
-                        batch_inputs=train_inputs[training_inds],
-                        batch_targets=train_targets[training_inds],
+            with self.graph.as_default():
+                with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
+                    training_loss = self.run_update_and_loss(
+                            batch_inputs=train_inputs[training_inds],
+                            batch_targets=train_targets[training_inds],
+                            *args, **kwargs)
+
+            validation_loss = np.nan
+            if validation_inputs is not None:
+
+                validation_loss = self.run_loss(
+                        batch_inputs=validation_inputs[validation_inds],
+                        batch_targets=validation_targets[validation_inds],
                         *args, **kwargs)
 
-        validation_loss = np.nan
-        if validation_inputs is not None:
-
-            validation_loss = self.run_loss(
-                    batch_inputs=validation_inputs[validation_inds],
-                    batch_targets=validation_targets[validation_inds],
-                    *args, **kwargs)
+        else:
+            with self.graph.as_default():
+                with tf.control_dependencies(self.graph.get_collection(tf.GraphKeys.UPDATE_OPS)):
+                    training_loss = self.run_update_and_loss(*args, **kwargs)
+            validation_loss = np.nan
+            if validation_inputs is not None:
+                validation_loss = self.run_loss(*args, **kwargs)
 
         self.on_train_step_done()
 

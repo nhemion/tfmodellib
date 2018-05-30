@@ -291,7 +291,8 @@ def build_cae_2d_graph(
         latent_activation=tf.nn.relu, output_activation=None,
         pooling_sizes=None, pooling_fun=tf.nn.avg_pool,
         unpooling_fun=tf.image.resize_images, use_bias=True, reuse=False,
-        use_dropout=False, use_bn=False, latent_op=None):
+        use_dropout=False, use_bn=False, encoder_name='encoder',
+        decoder_name='decoder', latent_op=None):
     """
     Defines a convolutional autoencoder graph, with `2*len(n_filters)`
     convolutional layers (`len(n_filters)` layers for both the encoder and the
@@ -365,13 +366,14 @@ def build_cae_2d_graph(
     tfmodels.build_autoencoder_graph : Standard (non-convolutional) autoencoder.
     """
 
-    encoder_output = build_conv_encoder_2d_graph(
-            input_tensor=input_tensor, n_filters=n_filters,
-            kernel_sizes=kernel_sizes, strides=strides,
-            hidden_activation=hidden_activation,
-            latent_activation=latent_activation, pooling_sizes=pooling_sizes,
-            pooling_fun=pooling_fun, use_bias=use_bias, use_dropout=use_dropout,
-            use_bn=use_bn)
+    with tf.variable_scope(encoder_name):
+        encoder_output = build_conv_encoder_2d_graph(
+                input_tensor=input_tensor, n_filters=n_filters,
+                kernel_sizes=kernel_sizes, strides=strides,
+                hidden_activation=hidden_activation,
+                latent_activation=latent_activation, pooling_sizes=pooling_sizes,
+                pooling_fun=pooling_fun, use_bias=use_bias, use_dropout=use_dropout,
+                use_bn=use_bn)
 
     # apply latent_op to the latent code
     if latent_op is not None:
@@ -385,14 +387,15 @@ def build_cae_2d_graph(
     unpooling_sizes = params_encoder_to_decoder(
             input_tensor, n_filters, kernel_sizes, strides, pooling_sizes)
 
-    reconstruction = build_conv_decoder_2d_graph(
-            input_tensor=decoder_input, n_filters=n_filters_decoder,
-            kernel_sizes=kernel_sizes_decoder, strides=strides_decoder,
-            hidden_activation=hidden_activation,
-            output_activation=output_activation,
-            unpooling_sizes=unpooling_sizes, unpooling_fun=unpooling_fun,
-            use_bias=use_bias, reuse=reuse, use_dropout=use_dropout,
-            use_bn=use_bn)
+    with tf.variable_scope(decoder_name):
+        reconstruction = build_conv_decoder_2d_graph(
+                input_tensor=decoder_input, n_filters=n_filters_decoder,
+                kernel_sizes=kernel_sizes_decoder, strides=strides_decoder,
+                hidden_activation=hidden_activation,
+                output_activation=output_activation,
+                unpooling_sizes=unpooling_sizes, unpooling_fun=unpooling_fun,
+                use_bias=use_bias, reuse=reuse, use_dropout=use_dropout,
+                use_bn=use_bn)
 
     return reconstruction
 
